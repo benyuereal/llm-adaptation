@@ -1,4 +1,542 @@
---- Target: /usr/local/lib/python3.10/dist-packages/sglang/srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16_moe.py
-+++ Modified: compressed_tensors_wNa16_moe.py
-# Apply: cp compressed_tensors_wNa16_moe.py /usr/local/lib/python3.10/dist-packages/sglang/srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16_moe.py
-# This is the complete modified file, not a diff.
+--- a/sglang/srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16_moe.py	2026-07-29 13:56:50.513892243 +0800
++++ b/sglang/srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16_moe.py	2026-07-29 09:35:05.200076408 +0800
+@@ -8,29 +8,20 @@
+ import torch
+ from compressed_tensors import CompressionFormat
+ 
+-from sglang.srt.hardware_backend.gpu.quantization.gptq_kernels import (
+-    gptq_marlin_moe_repack,
++from sglang.srt.hardware_backend.npu.quantization.fused_moe_method_npu import (
++    NPUW4A16Int4DynamicMoEMethod,
+ )
+-from sglang.srt.hardware_backend.npu.quantization.moe_methods import (
+-    NPUWNA16Int4MoEMethod,
+-)
+-from sglang.srt.layers.moe.moe_runner import MoeRunner, MoeRunnerConfig
+-from sglang.srt.layers.moe.utils import MoeRunnerBackend, get_moe_runner_backend
++from sglang.srt.layers.moe import MoeRunner, MoeRunnerBackend, MoeRunnerConfig
+ from sglang.srt.layers.quantization.compressed_tensors.schemes import (
+     WNA16_SUPPORTED_BITS,
+     CompressedTensorsMoEScheme,
+ )
+-from sglang.srt.layers.quantization.marlin_utils import (
+-    marlin_make_workspace,
+-    marlin_moe_permute_scales,
+-    moe_awq_to_marlin_zero_points,
+-)
++from sglang.srt.layers.quantization.gptq import gptq_marlin_moe_repack
++from sglang.srt.layers.quantization.marlin_utils import marlin_moe_permute_scales
+ from sglang.srt.layers.quantization.utils import replace_parameter
+ from sglang.srt.utils import get_bool_env_var, is_cuda, is_hip, set_weight_attrs
+ 
+ if TYPE_CHECKING:
+-    from compressed_tensors.quantization import QuantizationArgs
+-
+     from sglang.srt.layers.moe.token_dispatcher import (
+         CombineInput,
+         StandardDispatchOutput,
+@@ -39,6 +30,7 @@
+         CompressedTensorsConfig,
+     )
+ 
++
+ __all__ = [
+     "CompressedTensorsWNA16MoE",
+     "CompressedTensorsWNA16TritonMoE",
+@@ -64,22 +56,15 @@
+ 
+ class CompressedTensorsWNA16MoE(CompressedTensorsMoEScheme):
+ 
+-    def __init__(
+-        self,
+-        quant_config: CompressedTensorsConfig,
+-        weight_quant: QuantizationArgs,
+-        num_gpu_experts: int = -1,
+-    ):
++    def __init__(self, quant_config: CompressedTensorsConfig, num_gpu_experts=-1):
+         self.quant_config = quant_config
+-        # Per-layer scheme already resolved by get_moe_scheme(); reuse it directly
+-        # (mixed-precision MoE has no "Linear" config group to fall back on).
+-        config = weight_quant
++        config = self.quant_config.target_scheme_map["Linear"].get("weights")
+         self.num_bits = config.num_bits
+         self.packed_factor = 32 // config.num_bits
+         self.strategy = config.strategy
+         self.group_size = config.group_size
+         self.actorder = config.actorder
+-        self.sym = config.symmetric
++        self.symmetric = config.symmetric
+ 
+         if not (
+             self.quant_config.quant_format == CompressionFormat.pack_quantized.value
+@@ -139,11 +124,7 @@
+ 
+         # In the case where we have actorder/g_idx,
+         # we do not partition the w2 scales
+-        load_full_w2 = (
+-            self.actorder is not None
+-            and self.actorder != "static"
+-            and self.group_size != -1
+-        )
++        load_full_w2 = self.actorder and self.group_size != -1
+ 
+         if load_full_w2:
+             w2_scales_size = intermediate_size_per_partition * layer.moe_tp_size
+@@ -179,43 +160,47 @@
+         set_weight_attrs(w2_scale, extra_weight_attrs)
+         set_weight_attrs(w2_scale, {"load_full_w2": load_full_w2})
+ 
+-        w2_weight_shape = torch.nn.Parameter(
+-            torch.empty(num_experts, 2), requires_grad=False
+-        )
+-        layer.register_parameter("w2_weight_shape", w2_weight_shape)
+-        set_weight_attrs(w2_weight_shape, extra_weight_attrs)
+-        w13_weight_shape = torch.nn.Parameter(
+-            torch.empty(num_experts, 2), requires_grad=False
+-        )
+-
+-        layer.register_parameter("w13_weight_shape", w13_weight_shape)
+-        set_weight_attrs(w13_weight_shape, extra_weight_attrs)
+-
+-        # add zero param
+-        if not self.sym:
+-            w13_qzeros = torch.nn.Parameter(
+-                torch.empty(
++        # Zero points for asymmetric quantization
++        # Checkpoint per-expert zp: [N//8, K//group_size] int32
++        # Loader will transpose to [K//group_size, N//8] then TP-shard on dim 1
++        # Final param shape: [E, K//group_size, N_tp//8] where N_tp = 2*intermediate_per_partition
++        if not self.symmetric:
++            zp_pack_factor = 8
++            w13_zp = torch.nn.Parameter(
++                torch.zeros(
+                     num_experts,
+                     num_groups_w13,
+-                    2 * intermediate_size_per_partition // self.packed_factor,
++                    2 * intermediate_size_per_partition // zp_pack_factor,
+                     dtype=torch.int32,
+                 ),
+                 requires_grad=False,
+             )
+-            layer.register_parameter("w13_weight_zero_point", w13_qzeros)
+-            set_weight_attrs(w13_qzeros, extra_weight_attrs)
++            layer.register_parameter("w13_weight_zero_point", w13_zp)
++            set_weight_attrs(w13_zp, extra_weight_attrs)
+ 
+-            w2_qzeros = torch.nn.Parameter(
+-                torch.empty(
++            w2_zp = torch.nn.Parameter(
++                torch.zeros(
+                     num_experts,
+                     num_groups_w2,
+-                    hidden_size // self.packed_factor,
++                    hidden_size // zp_pack_factor,
+                     dtype=torch.int32,
+                 ),
+                 requires_grad=False,
+             )
+-            layer.register_parameter("w2_weight_zero_point", w2_qzeros)
+-            set_weight_attrs(w2_qzeros, extra_weight_attrs)
++            layer.register_parameter("w2_weight_zero_point", w2_zp)
++            set_weight_attrs(w2_zp, extra_weight_attrs)
++
++        w2_weight_shape = torch.nn.Parameter(
++            torch.empty(num_experts, 2), requires_grad=False
++        )
++        layer.register_parameter("w2_weight_shape", w2_weight_shape)
++        set_weight_attrs(w2_weight_shape, extra_weight_attrs)
++        w13_weight_shape = torch.nn.Parameter(
++            torch.empty(num_experts, 2), requires_grad=False
++        )
++
++        layer.register_parameter("w13_weight_shape", w13_weight_shape)
++        set_weight_attrs(w13_weight_shape, extra_weight_attrs)
+ 
+         w13_g_idx = torch.nn.Parameter(
+             torch.empty(
+@@ -276,10 +261,6 @@
+         layer._original_shapes["w2_weight_scale"] = tuple(w2_scale.shape)
+         layer._original_shapes["w13_weight_scale"] = tuple(w13_scale.shape)
+ 
+-        if not self.sym:
+-            layer._original_shapes["w13_weight_zero_point"] = w13_qzeros.shape
+-            layer._original_shapes["w2_weight_zero_point"] = tuple(w2_qzeros.shape)
+-
+     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+ 
+         # Skip if the layer is already converted to Marlin format to prevent double-packing.
+@@ -383,25 +364,6 @@
+         )
+         replace_tensor("w2_weight_scale", marlin_w2_scales)
+ 
+-        # Repack zero
+-        if not self.sym:
+-            marlin_w13_zp = moe_awq_to_marlin_zero_points(
+-                layer.w13_weight_zero_point,
+-                size_k=layer.w13_weight_zero_point.shape[1],
+-                size_n=layer.w13_weight_zero_point.shape[2] * self.packed_factor,
+-                num_bits=self.num_bits,
+-            )
+-            replace_tensor("w13_weight_zero_point", marlin_w13_zp)
+-
+-            marlin_w2_zp = moe_awq_to_marlin_zero_points(
+-                layer.w2_weight_zero_point,
+-                size_k=layer.w2_weight_zero_point.shape[1],
+-                size_n=layer.w2_weight_zero_point.shape[2] * self.packed_factor,
+-                num_bits=self.num_bits,
+-            )
+-            replace_tensor("w2_weight_zero_point", marlin_w2_zp)
+-
+-        layer.workspace = marlin_make_workspace(layer.w13_weight_packed.device, 4)
+         layer.is_marlin_converted = True
+ 
+     def restore_weights_before_loading(self, layer: torch.nn.Module):
+@@ -438,8 +400,6 @@
+             w13_g_idx=getattr(layer, "w13_weight_g_idx", None),
+             w2_g_idx=getattr(layer, "w2_weight_g_idx", None),
+             is_k_full=self.is_k_full,
+-            w13_qzeros=layer.w13_weight_zero_point if not self.sym else None,
+-            w2_qzeros=layer.w2_weight_zero_point if not self.sym else None,
+         )
+ 
+     def apply_weights(
+@@ -486,13 +446,9 @@
+             g_idx2=layer.w2_weight_g_idx,
+             sort_indices1=layer.w13_g_idx_sort_indices,
+             sort_indices2=layer.w2_g_idx_sort_indices,
+-            w1_zeros=layer.w13_weight_zero_point if not self.sym else None,
+-            w2_zeros=layer.w2_weight_zero_point if not self.sym else None,
+             num_bits=self.num_bits,
+             is_k_full=self.is_k_full,
+             routed_scaling_factor=self.moe_runner_config.routed_scaling_factor,
+-            clamp_limit=self.moe_runner_config.swiglu_limit,
+-            workspace=layer.workspace,
+         )
+         return StandardCombineInput(hidden_states=output)
+ 
+@@ -500,16 +456,34 @@
+ class CompressedTensorsWNA16TritonMoE(CompressedTensorsWNA16MoE):
+     """ROCm/HIP-compatible W4A16 MoE method using Triton kernels instead of Marlin.
+ 
+-    Inherits weight creation from CompressedTensorsWNA16MoE but converts
+-    weights to the uint8-packed format expected by the Triton fused MoE kernel
+-    instead of the Marlin-specific format.
++    Keeps INT4 packed weights in VRAM. At inference time, passes packed weights
++    + scales directly to the Triton fused MoE kernel which performs dequant
++    inside the kernel (use_int4_w4a16=True).
+     """
+ 
+     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+         if getattr(layer, "is_triton_converted", False):
+             return
+ 
+-        num_experts = layer.w13_weight_packed.shape[0]
++        # Pre-conversion diagnostic: check which layers have zero zp
++        if hasattr(layer, "w13_weight_zero_point") and layer.w13_weight_zero_point is not None:
++            if not hasattr(CompressedTensorsWNA16TritonMoE, '_pre_conv_count'):
++                CompressedTensorsWNA16TritonMoE._pre_conv_count = 0
++            CompressedTensorsWNA16TritonMoE._pre_conv_count += 1
++            cnt = CompressedTensorsWNA16TritonMoE._pre_conv_count
++            raw = layer.w13_weight_zero_point.data
++            all_zero = (raw == 0).all().item()
++            nz_experts = sum(1 for ei in range(raw.shape[0]) if (raw[ei] != 0).any())
++            if all_zero or cnt <= 5:
++                import os
++                rank = os.environ.get("RANK", os.environ.get("LOCAL_RANK", "?"))
++                with open('/workspace/zp_preconv_diag.txt', 'a') as _f:
++                    _f.write(
++                        f"layer_ord={cnt} rank={rank} all_zero={all_zero} "
++                        f"nz_experts={nz_experts}/{raw.shape[0]} "
++                        f"shape={list(raw.shape)} sample_e0={raw[0,0,:4].tolist()} "
++                        f"data_ptr={raw.data_ptr()} param_id={id(layer.w13_weight_zero_point)}\n"
++                    )
+ 
+         # Convert w13 weights: [E, K//8, N] int32 -> [E, N, K//2] uint8
+         w13 = layer.w13_weight_packed.data
+@@ -531,8 +505,84 @@
+         w2_scale = w2_scale.transpose(1, 2).contiguous()
+         layer.w2_weight_scale = torch.nn.Parameter(w2_scale, requires_grad=False)
+ 
++        # Convert zero points: [E, K_groups, N_tp//8] int32 → [E, N_tp//2, K_groups] uint8
++        # Each int32 has 8 nibbles for 8 N positions; each byte has 2 nibbles
++        if hasattr(layer, "w13_weight_zero_point") and layer.w13_weight_zero_point is not None:
++            w13_zp = layer.w13_weight_zero_point.data  # [E, K_groups, N_tp//8] int32
++            # Fill zero experts with default zp=8 (each nibble = 8 → each byte = 0x88)
++            # Check per-expert to avoid masking partially-loaded layers
++            num_zero_experts = 0
++            for ei in range(w13_zp.shape[0]):
++                if (w13_zp[ei] == 0).all():
++                    w13_zp[ei].view(torch.uint8).fill_(0x88)
++                    num_zero_experts += 1
++            if num_zero_experts > 0:
++                logger.warning(
++                    f"w13_zp: {num_zero_experts}/{w13_zp.shape[0]} experts had zero zp, "
++                    f"filled with default zp=8. Shape={w13_zp.shape}"
++                )
++            w13_zp = w13_zp.transpose(1, 2).contiguous()  # [E, N_tp//8, K_groups]
++            E_zp, Npack, Kgroups = w13_zp.shape
++            zp_u8 = w13_zp.view(torch.uint8).reshape(E_zp, Npack, Kgroups, 4)
++            zp_u8 = zp_u8.permute(0, 1, 3, 2).contiguous().reshape(E_zp, Npack * 4, Kgroups)
++            layer.w13_weight_zero_point = torch.nn.Parameter(zp_u8, requires_grad=False)
++
++        if hasattr(layer, "w2_weight_zero_point") and layer.w2_weight_zero_point is not None:
++            w2_zp = layer.w2_weight_zero_point.data
++            num_zero_experts = 0
++            for ei in range(w2_zp.shape[0]):
++                if (w2_zp[ei] == 0).all():
++                    w2_zp[ei].view(torch.uint8).fill_(0x88)
++                    num_zero_experts += 1
++            if num_zero_experts > 0:
++                logger.warning(
++                    f"w2_zp: {num_zero_experts}/{w2_zp.shape[0]} experts had zero zp, "
++                    f"filled with default zp=8. Shape={w2_zp.shape}"
++                )
++            w2_zp = w2_zp.transpose(1, 2).contiguous()
++            E_zp, Npack, Kgroups = w2_zp.shape
++            zp_u8 = w2_zp.view(torch.uint8).reshape(E_zp, Npack, Kgroups, 4)
++            zp_u8 = zp_u8.permute(0, 1, 3, 2).contiguous().reshape(E_zp, Npack * 4, Kgroups)
++            layer.w2_weight_zero_point = torch.nn.Parameter(zp_u8, requires_grad=False)
++
+         layer.is_triton_converted = True
+ 
++        # Debug: dump zp data for ALL layers
++        if hasattr(layer, "w13_weight_zero_point"):
++            if not hasattr(CompressedTensorsWNA16TritonMoE, '_zp_dump_count'):
++                CompressedTensorsWNA16TritonMoE._zp_dump_count = 0
++                CompressedTensorsWNA16TritonMoE._zp_nonzero_layers = 0
++                CompressedTensorsWNA16TritonMoE._zp_zero_layers = 0
++                CompressedTensorsWNA16TritonMoE._zp_zero_expert_info = []
++            CompressedTensorsWNA16TritonMoE._zp_dump_count += 1
++            raw = layer.w13_weight_zero_point.data
++            nz = (raw != 0).sum().item()
++            # Count per-expert zeros (after fill, should be 0x88 not zero)
++            zero_experts = []
++            for ei in range(raw.shape[0]):
++                if (raw[ei] == 0).all():
++                    zero_experts.append(ei)
++            if nz > 0 and not zero_experts:
++                CompressedTensorsWNA16TritonMoE._zp_nonzero_layers += 1
++            else:
++                CompressedTensorsWNA16TritonMoE._zp_zero_layers += 1
++                CompressedTensorsWNA16TritonMoE._zp_zero_expert_info.append({
++                    'layer_idx': CompressedTensorsWNA16TritonMoE._zp_dump_count - 1,
++                    'zero_experts': zero_experts[:10],
++                    'total_zero': len(zero_experts),
++                })
++            # Dump summary on last layer
++            if CompressedTensorsWNA16TritonMoE._zp_dump_count == 57:
++                torch.save({
++                    'total_layers': 57,
++                    'nonzero_layers': CompressedTensorsWNA16TritonMoE._zp_nonzero_layers,
++                    'zero_layers': CompressedTensorsWNA16TritonMoE._zp_zero_layers,
++                    'zero_expert_info': CompressedTensorsWNA16TritonMoE._zp_zero_expert_info,
++                    'last_layer_nonzero': nz,
++                    'last_layer_total': raw.numel(),
++                    'last_layer_sample': raw[0, :4, :4].cpu().clone(),
++                }, '/workspace/zp_all_layers.pt')
++
+     def create_moe_runner(
+         self, layer: torch.nn.Module, moe_runner_config: MoeRunnerConfig
+     ):
+@@ -542,12 +592,17 @@
+     def get_triton_quant_info(self, layer):
+         from sglang.srt.layers.moe.moe_runner.triton import TritonMoeQuantInfo
+ 
++        w13_zp = getattr(layer, "w13_weight_zero_point", None)
++        w2_zp = getattr(layer, "w2_weight_zero_point", None)
++
+         return TritonMoeQuantInfo(
+             w13_weight=layer.w13_weight_packed,
+             w2_weight=layer.w2_weight_packed,
+             use_int4_w4a16=True,
+             w13_scale=layer.w13_weight_scale,
+             w2_scale=layer.w2_weight_scale,
++            w13_zp=w13_zp,
++            w2_zp=w2_zp,
+             block_shape=[0, self.group_size],
+         )
+ 
+@@ -556,13 +611,97 @@
+         layer: torch.nn.Module,
+         dispatch_output: StandardDispatchOutput,
+     ) -> CombineInput:
+-        assert (
+-            self.moe_runner_config.activation == "silu"
+-        ), "Only SiLU activation is supported."
+-
++        """Dynamic dequant: pass INT4 packed weights to Triton fused kernel."""
++        if get_bool_env_var("SGLANG_MOE_TORCH_FALLBACK"):
++            return self._apply_weights_torch_fallback(layer, dispatch_output)
+         quant_info = self.get_triton_quant_info(layer)
+         return self.runner.run(dispatch_output, quant_info)
+ 
++    def _apply_weights_torch_fallback(self, layer, dispatch_output):
++        """Pure PyTorch dequant fallback for debugging. Slow but correct."""
++        from sglang.srt.layers.moe.token_dispatcher import StandardCombineInput
++
++        x = dispatch_output.hidden_states  # [num_tokens, K]
++        topk_output = dispatch_output.topk_output
++        topk_weights, topk_ids, _ = topk_output
++        num_tokens, K = x.shape
++        top_k = topk_ids.shape[1]
++
++        # w13: [E, N_w13, K//2] uint8, scale: [E, N_w13, K_groups], zp: [E, N_w13//2, K_groups]
++        w13 = layer.w13_weight_packed  # uint8
++        s13 = layer.w13_weight_scale   # bf16
++        zp13 = getattr(layer, "w13_weight_zero_point", None)  # uint8
++        w2 = layer.w2_weight_packed
++        s2 = layer.w2_weight_scale
++        zp2 = getattr(layer, "w2_weight_zero_point", None)
++
++        E, N_w13, K_half = w13.shape
++        N_w2 = w2.shape[1]
++        group_size = self.group_size
++
++        # Dequant one expert's weight on the fly
++        def dequant_expert(w, s, zp, expert_id):
++            # w: [E, N, K//2] uint8 -> [N, K] float
++            we = w[expert_id]  # [N, K//2]
++            se = s[expert_id].float()  # [N, K_groups]
++            N_dim = we.shape[0]
++            # Unpack nibbles
++            lo = (we & 0x0F).to(torch.float32)  # even K
++            hi = ((we >> 4) & 0x0F).to(torch.float32)  # odd K
++            # Interleave: [N, K]
++            w_full = torch.stack([lo, hi], dim=-1).reshape(N_dim, -1)  # [N, K]
++            # ZP
++            if zp is not None:
++                zpe = zp[expert_id]  # [N//2, K_groups]
++                zp_lo = (zpe & 0x0F).to(torch.float32)  # even N
++                zp_hi = ((zpe >> 4) & 0x0F).to(torch.float32)  # odd N
++                zp_full = torch.stack([zp_lo, zp_hi], dim=1).reshape(N_dim, -1)  # [N, K_groups]... 
++                # Actually zp is [N//2, K_groups], need to expand to [N, K_groups]
++                zp_full2 = torch.zeros(N_dim, zpe.shape[1], device=zpe.device, dtype=torch.float32)
++                zp_full2[0::2, :] = zp_lo
++                zp_full2[1::2, :] = zp_hi
++                # Expand zp to [N, K]
++                zp_expanded = zp_full2.repeat_interleave(group_size, dim=1)  # [N, K]
++            else:
++                zp_expanded = torch.full_like(w_full, 8.0)
++            # Scale expand to [N, K]
++            s_expanded = se.repeat_interleave(group_size, dim=1)  # [N, K]
++            # Dequant
++            return ((w_full - zp_expanded) * s_expanded).to(x.dtype)
++
++        # Per-token per-expert matmul
++        N_w2 = w2.shape[1]  # hidden_size (output dim of down proj)
++        output = torch.zeros(num_tokens, N_w2, dtype=x.dtype, device=x.device)
++        
++        for k in range(top_k):
++            expert_ids_k = topk_ids[:, k]  # [num_tokens]
++            weights_k = topk_weights[:, k]  # [num_tokens]
++            
++            # Group tokens by expert
++            unique_experts = expert_ids_k.unique()
++            for eid in unique_experts:
++                mask = expert_ids_k == eid
++                x_expert = x[mask]  # [n, K]
++                
++                # w13 = gate + up fused: first N_w13//2 is gate, second is up
++                w13_dequant = dequant_expert(w13, s13, zp13, eid)  # [N_w13, K]
++                gate_up = x_expert @ w13_dequant.T  # [n, N_w13]
++                
++                # SiLU gate
++                N_half = N_w13 // 2
++                gate = gate_up[:, :N_half]
++                up = gate_up[:, N_half:]
++                hidden = torch.nn.functional.silu(gate) * up  # [n, N_half]
++                
++                # w2: down projection
++                w2_dequant = dequant_expert(w2, s2, zp2, eid)  # [N_w2, K_w2]
++                down = hidden @ w2_dequant.T  # [n, N_w2]
++                
++                # Weighted accumulate
++                output[mask] += down * weights_k[mask, None]
++        
++        return StandardCombineInput(hidden_states=output)
++
+ 
+ class NPUCompressedTensorsW4A16Int4DynamicMoE(CompressedTensorsMoEScheme):
+ 
+@@ -578,8 +717,7 @@
+         else:
+             self.group_size = 128
+ 
+-        self.w13_kernel = NPUWNA16Int4MoEMethod()
+-        self.w2_kernel = NPUWNA16Int4MoEMethod()
++        self.kernel = NPUW4A16Int4DynamicMoEMethod()
+ 
+     # TODO: See if we can merge this method's logic
+     # with CompressedTensorsWNA16MoE. Need more models and tests.
+@@ -681,51 +819,36 @@
+         layer.register_parameter("w2_weight_offset", w2_weight_offset)
+         set_weight_attrs(w2_weight_offset, extra_weight_attrs)
+ 
+-        w13_weight_shape = torch.nn.Parameter(
+-            torch.empty(num_experts, 2), requires_grad=False
+-        )
+-        layer.register_parameter("w13_weight_shape", w13_weight_shape)
+-        set_weight_attrs(w13_weight_shape, extra_weight_attrs)
+-
+-        w2_weight_shape = torch.nn.Parameter(
+-            torch.empty(num_experts, 2), requires_grad=False
+-        )
+-        layer.register_parameter("w2_weight_shape", w2_weight_shape)
+-        set_weight_attrs(w2_weight_shape, extra_weight_attrs)
+-
+     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+-        self.w13_kernel.process_weights_after_loading(layer, "w13")
+-        self.w2_kernel.process_weights_after_loading(layer, "w2")
++        self.kernel.process_weights_after_loading(layer)
+ 
+     def create_moe_runner(
+         self, layer: torch.nn.Module, moe_runner_config: MoeRunnerConfig
+     ):
+-        layer.w13_kernel = self.w13_kernel
+-        layer.w2_kernel = self.w2_kernel
+-        moe_runner_config.layer = layer
+         self.moe_runner_config = moe_runner_config
+-        backend = get_moe_runner_backend()
+-        if backend.is_auto():
+-            backend = MoeRunnerBackend.ASCEND
+-        self.runner = MoeRunner(backend, moe_runner_config)
+ 
+     def apply_weights(
+         self,
+         layer: torch.nn.Module,
+         dispatch_output: StandardDispatchOutput,
+     ) -> CombineInput:
+-        from sglang.srt.layers.moe.moe_runner.ascend import AscendQuantInfo
+ 
+-        quant_info = AscendQuantInfo(
+-            w13_weight=layer.w13_weight,
+-            w2_weight=layer.w2_weight,
+-            w13_weight_scale=layer.w13_weight_scale,
+-            w2_weight_scale=layer.w2_weight_scale,
+-            w13_weight_offset=layer.w13_weight_offset,
+-            w2_weight_offset=layer.w2_weight_offset,
+-            w13_weight_bias=getattr(layer, "w13_weight_bias", None),
+-            w2_weight_bias=getattr(layer, "w2_weight_bias", None),
+-            w13_scale_bias=getattr(layer, "w13_scale_bias", None),
+-            w2_scale_bias=getattr(layer, "w2_scale_bias", None),
++        return self.kernel.apply(layer, dispatch_output)
++
++    def apply_without_routing_weights(
++        self,
++        layer,
++        hidden_states,
++        hidden_states_scale,
++        group_list_type,
++        group_list,
++        output_dtype,
++    ):
++        return self.kernel.apply_without_routing_weights(
++            layer,
++            hidden_states,
++            hidden_states_scale,
++            group_list_type,
++            group_list,
++            output_dtype,
+         )
+-        return self.runner.run(dispatch_output, quant_info)
+

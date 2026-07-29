@@ -1,4 +1,315 @@
---- Target: /usr/local/lib/python3.10/dist-packages/sglang/srt/layers/moe/moe_runner/triton_utils/fused_moe.py
-+++ Modified: fused_moe.py
-# Apply: cp fused_moe.py /usr/local/lib/python3.10/dist-packages/sglang/srt/layers/moe/moe_runner/triton_utils/fused_moe.py
-# This is the complete modified file, not a diff.
+--- a/sglang/srt/layers/moe/moe_runner/triton_utils/fused_moe.py	2026-07-29 13:56:50.509892269 +0800
++++ b/sglang/srt/layers/moe/moe_runner/triton_utils/fused_moe.py	2026-07-29 11:04:13.380429383 +0800
+@@ -13,22 +13,10 @@
+ import torch.nn.functional as F
+ import triton.language as tl
+ 
+-from sglang.kernels.ops.moe.fused_moe_triton_kernels import (
+-    act_and_mul_triton,
+-    invoke_fused_moe_kernel,
+-    moe_sum_reduce_triton,
+-    support_tensor_descriptor,
+-)
+-from sglang.srt.batch_invariant_ops import is_batch_invariant_mode_enabled
+-from sglang.srt.distributed import get_tp_group
+-from sglang.srt.distributed.device_communicators.pynccl_allocator import (
+-    use_symmetric_memory,
+-)
+ from sglang.srt.environ import envs
+-from sglang.srt.layers.dp_attention import is_allocation_symmetric
+ from sglang.srt.layers.moe.moe_runner import MoeRunnerConfig
+ from sglang.srt.layers.moe.utils import get_moe_padding_size
+-from sglang.srt.runtime_context import get_server_args
++from sglang.srt.server_args import get_global_server_args
+ from sglang.srt.utils import (
+     cpu_has_amx_support,
+     get_bool_env_var,
+@@ -42,7 +30,13 @@
+ from sglang.srt.utils.custom_op import register_custom_op
+ 
+ from .fused_moe_triton_config import get_config_dtype_str, try_get_optimal_moe_config
+-from .moe_align_block_size import moe_align_block_size
++from .fused_moe_triton_kernels import (
++    act_and_mul_triton,
++    invoke_fused_moe_kernel,
++    moe_sum_reduce_triton,
++    support_tensor_descriptor,
++)
++from .moe_align_block_size import moe_align_block_size, dcu_moe_align_block_size
+ 
+ if TYPE_CHECKING:
+     from sglang.srt.layers.moe.topk import StandardTopKOutput
+@@ -60,7 +54,7 @@
+ if _is_cuda:
+     from sgl_kernel import moe_sum_reduce
+ 
+-    from sglang.kernels.ops.activation.activation import gelu_and_mul, silu_and_mul
++    from sglang.jit_kernel.activation import gelu_and_mul, silu_and_mul
+ elif _is_cpu and _is_cpu_amx_available:
+     pass
+ elif _is_hip:
+@@ -94,10 +88,6 @@
+ padding_size = get_moe_padding_size(_use_aiter)
+ 
+ 
+-def _use_moe_sum_reduce_torch_compile(num_tokens: int) -> bool:
+-    return num_tokens <= 32 and not is_batch_invariant_mode_enabled()
+-
+-
+ @register_custom_op(mutates_args=["hidden_states"])
+ def inplace_fused_experts(
+     hidden_states: torch.Tensor,
+@@ -127,7 +117,7 @@
+     gemm1_limit: Optional[float] = None,
+     filter_expert: bool = True,
+     swiglu_limit: Optional[float] = None,
+-    gate_up_interleaved: bool = True,
++    interleaved: bool = True,
+ ) -> None:
+     fused_experts_impl(
+         hidden_states,
+@@ -159,7 +149,7 @@
+         gemm1_limit,
+         filter_expert,
+         swiglu_limit=swiglu_limit,
+-        gate_up_interleaved=gate_up_interleaved,
++        interleaved=interleaved,
+     )
+ 
+ 
+@@ -193,7 +183,7 @@
+     gemm1_limit: Optional[float] = None,
+     filter_expert: bool = True,
+     swiglu_limit: Optional[float] = None,
+-    gate_up_interleaved: bool = True,
++    interleaved: bool = True,
+ ) -> torch.Tensor:
+     return fused_experts_impl(
+         hidden_states,
+@@ -225,7 +215,7 @@
+         gemm1_limit=gemm1_limit,
+         filter_expert=filter_expert,
+         swiglu_limit=swiglu_limit,
+-        gate_up_interleaved=gate_up_interleaved,
++        interleaved=interleaved,
+     )
+ 
+ 
+@@ -285,7 +275,7 @@
+             moe_runner_config.gemm1_clamp_limit,
+             filter_expert,
+             swiglu_limit=moe_runner_config.swiglu_limit,
+-            gate_up_interleaved=moe_runner_config.gate_up_interleaved,
++            interleaved=moe_runner_config.interleaved,
+         )
+         return hidden_states
+     else:
+@@ -318,7 +308,7 @@
+             gemm1_limit=moe_runner_config.gemm1_clamp_limit,
+             filter_expert=filter_expert,
+             swiglu_limit=moe_runner_config.swiglu_limit,
+-            gate_up_interleaved=moe_runner_config.gate_up_interleaved,
++            interleaved=moe_runner_config.interleaved,
+         )
+ 
+ 
+@@ -408,7 +398,10 @@
+         and down_config.pop("USE_TMA", False)
+     )
+ 
+-    sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
++    # sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
++    #     topk_ids, config["BLOCK_SIZE_M"], E
++    # )
++    sorted_token_ids, expert_ids, num_tokens_post_padded = dcu_moe_align_block_size(
+         topk_ids, config["BLOCK_SIZE_M"], E
+     )
+ 
+@@ -460,7 +453,7 @@
+     filter_expert: bool,
+     hooks: Optional[Any] = None,
+     swiglu_limit: Optional[float] = None,
+-    gate_up_interleaved: bool = True,
++    interleaved: bool = True,
+ ) -> torch.Tensor:
+     """Run the MoE kernel/activation/kernel/combine sequence in a single shot.
+ 
+@@ -473,12 +466,6 @@
+     topk = topk_ids.shape[1]
+     compute_type = tl.bfloat16 if hidden_states.dtype == torch.bfloat16 else tl.float16
+ 
+-    # LoRA hooks consume and update route-major intermediate buffers. The TMA
+-    # down path keeps those buffers in expert-sorted, block-padded order, which
+-    # is incompatible with the hook contract.
+-    if hooks and (hooks.after_gate_up is not None or hooks.after_down is not None):
+-        down_moe_use_tma = False
+-
+     padded_tokens = (
+         min(num_tokens * topk, E + 1) * (config["BLOCK_SIZE_M"] - 1)
+         if down_moe_use_tma
+@@ -496,17 +483,10 @@
+     elif inplace:
+         out_hidden_states = hidden_states
+     else:
+-        # Allocate the MoE output in the NCCL symmetric memory pool when symmetric
+-        # allocation is required, so the downstream all-reduce takes the low-latency
+-        # symmetric path. Only this output enters the pool; the intermediate caches
+-        # below stay on the default allocator to bound pool occupancy.
+-        with use_symmetric_memory(
+-            get_tp_group(), disabled=not is_allocation_symmetric()
+-        ):
+-            out_hidden_states = torch.empty_like(hidden_states)
++        out_hidden_states = torch.empty_like(hidden_states)
+ 
+     use_fused_moe_sum_all_reduce = (
+-        get_server_args().enable_fused_moe_sum_all_reduce
++        get_global_server_args().enable_fused_moe_sum_all_reduce
+         and (not no_combine)
+         and (topk > 2)
+         and (not use_int8_w8a16)
+@@ -546,8 +526,28 @@
+         filter_expert=filter_expert,
+     )
+ 
++    # Diagnostic: check if first kernel produced any output
++    if not getattr(fused_experts_impl, '_kernel_diag_done', False):
++        fused_experts_impl._kernel_diag_done = True
++        import os
++        rank = os.environ.get("RANK", os.environ.get("LOCAL_RANK", "?"))
++        torch.cuda.synchronize()
++        c1 = intermediate_cache1.float()
++        with open('/workspace/kernel_seq_diag.txt', 'a') as _f:
++            _f.write(f"rank={rank} after_w13_kernel:\n")
++            _f.write(f"  cache1: shape={list(c1.shape)} mean={c1.mean().item():.6f} std={c1.std().item():.6f} "
++                     f"min={c1.min().item():.4f} max={c1.max().item():.4f} "
++                     f"nonzero={c1.abs().sum().item():.4f}\n")
++            _f.write(f"  hidden_states: shape={list(hidden_states.shape)} "
++                     f"mean={hidden_states.float().mean().item():.6f}\n")
++            _f.write(f"  w1: shape={list(w1.shape)} dtype={w1.dtype}\n")
++            _f.write(f"  config={config}\n")
++            _f.write(f"  use_int4_w4a16={use_int4_w4a16} block_shape={block_shape}\n")
++            _f.write(f"  sorted_token_ids[:8]={sorted_token_ids[:8].tolist()}\n")
++            _f.write(f"  expert_ids[:8]={expert_ids[:8].tolist()}\n")
++            _f.write(f"  num_tokens_post_padded={num_tokens_post_padded.tolist()}\n")
++
+     if hooks and hooks.after_gate_up:
+-        # Hooks expect intermediate_cache1 shaped (num_tokens, topk, N); the
+         # underlying buffer is laid out as (total_tokens, N) where
+         # total_tokens = num_tokens * topk (+ TMA padding). Slice off any
+         # padding and reshape for the hook, which writes in-place on the view.
+@@ -571,7 +571,7 @@
+         # - swiglu_limit != None: DeepSeek V4 swiglu clamp + silu_and_mul (CUDA/HIP only)
+         if gemm1_alpha is not None:
+             assert gemm1_limit is not None
+-            if gate_up_interleaved:
++            if interleaved:
+                 intermediate_cache2 = swiglu_gpt_oss_sigmoid_alpha(
+                     intermediate_cache1.view(-1, N),
+                     gemm1_alpha,
+@@ -616,7 +616,7 @@
+ 
+             if not filter_expert:
+                 if swiglu_limit_for_silu_and_mul_clamp is not None:
+-                    from sglang.kernels.ops.attention.dsv4 import silu_and_mul_clamp
++                    from sglang.jit_kernel.deepseek_v4 import silu_and_mul_clamp
+ 
+                     silu_and_mul_clamp(
+                         intermediate_cache1.view(-1, N),
+@@ -748,6 +748,17 @@
+         router_topk=topk,
+     )
+ 
++    # Diagnostic: check w2 kernel output and combine
++    if not getattr(fused_experts_impl, '_kernel_diag2_done', False):
++        fused_experts_impl._kernel_diag2_done = True
++        torch.cuda.synchronize()
++        c2 = intermediate_cache2.float()
++        c3 = intermediate_cache3.float()
++        with open('/workspace/kernel_seq_diag.txt', 'a') as _f:
++            _f.write(f"  after_silu cache2: mean={c2.mean().item():.6f} std={c2.std().item():.6f} nonzero={c2.abs().sum().item():.4f}\n")
++            _f.write(f"  after_w2_kernel cache3: shape={list(c3.shape)} mean={c3.mean().item():.6f} std={c3.std().item():.6f} nonzero={c3.abs().sum().item():.4f}\n")
++            _f.write(f"  out_hidden_states before combine: mean={out_hidden_states.float().mean().item():.6f}\n")
++
+     if hooks and hooks.after_down:
+         hooks.after_down(
+             intermediate_cache2, intermediate_cache3, topk_weights, topk_ids
+@@ -775,7 +786,7 @@
+             ).squeeze(dim=1)
+         else:
+             # According to micro benchmark results, torch.compile can get better performance for small token.
+-            if _use_moe_sum_reduce_torch_compile(num_tokens):
++            if num_tokens <= 32:
+                 moe_sum_reduce_torch_compile(
+                     intermediate_cache3.view(*intermediate_cache3.shape),
+                     out_hidden_states,
+@@ -794,28 +805,30 @@
+                 out_hidden_states,
+             )
+         else:
+-            # According to micro benchmark results, torch.compile can get better performance for small token.
+-            if _use_moe_sum_reduce_torch_compile(num_tokens):
+-                moe_sum_reduce_torch_compile(
+-                    intermediate_cache3.view(*intermediate_cache3.shape),
+-                    out_hidden_states,
+-                    routed_scaling_factor,
+-                )
+-            else:
+-                moe_sum_reduce_triton(
+-                    intermediate_cache3.view(*intermediate_cache3.shape),
+-                    out_hidden_states,
+-                    routed_scaling_factor,
+-                )
++            # Use PyTorch native sum — moe_sum_reduce_triton has issues on gfx928
++            if not getattr(fused_experts_impl, '_combine_diag_done', False):
++                fused_experts_impl._combine_diag_done = True
++                with open('/workspace/combine_diag.txt', 'a') as _f:
++                    _f.write(f"BEFORE combine:\n")
++                    _f.write(f"  cache3: shape={list(intermediate_cache3.shape)} mean={intermediate_cache3.float().mean().item():.6f}\n")
++                    _f.write(f"  out_hs: shape={list(out_hidden_states.shape)} mean={out_hidden_states.float().mean().item():.6f} ptr={out_hidden_states.data_ptr()}\n")
++                    _f.write(f"  hidden_states ptr={hidden_states.data_ptr()}\n")
++                    _f.write(f"  inplace={inplace}, _use_intermediate={_use_intermediate}\n")
++            torch.sum(intermediate_cache3, dim=1, out=out_hidden_states)
++            if routed_scaling_factor != 1.0:
++                out_hidden_states.mul_(routed_scaling_factor)
++            if not getattr(fused_experts_impl, '_combine_diag2_done', False):
++                fused_experts_impl._combine_diag2_done = True
++                with open('/workspace/combine_diag.txt', 'a') as _f:
++                    _f.write(f"AFTER combine:\n")
++                    _f.write(f"  out_hs: mean={out_hidden_states.float().mean().item():.6f} ptr={out_hidden_states.data_ptr()}\n")
++                    _f.write(f"  hidden_states: mean={hidden_states.float().mean().item():.6f} ptr={hidden_states.data_ptr()}\n")
+     elif _is_xpu:
+-        if topk == 1 and routed_scaling_factor == 1.0 and not _use_intermediate:
+-            pass  # we wrote directly into out_hidden_states
+-        else:
+-            moe_sum_reduce(
+-                intermediate_cache3.view(*intermediate_cache3.shape),
+-                out_hidden_states,
+-                routed_scaling_factor,
+-            )
++        moe_sum_reduce(
++            intermediate_cache3.view(*intermediate_cache3.shape),
++            out_hidden_states,
++            routed_scaling_factor,
++        )
+     else:
+         if _has_vllm_ops:
+             vllm_ops.moe_sum(
+@@ -865,7 +878,7 @@
+     gemm1_limit: Optional[float] = None,
+     filter_expert: bool = True,
+     swiglu_limit: Optional[float] = None,
+-    gate_up_interleaved: bool = True,
++    interleaved: bool = True,
+ ):
+     padded_size = padding_size
+     if not (use_fp8_w8a8 or use_int8_w8a8) or block_shape is not None or _use_aiter:
+@@ -941,7 +954,7 @@
+         filter_expert=filter_expert,
+         hooks=None,
+         swiglu_limit=swiglu_limit,
+-        gate_up_interleaved=gate_up_interleaved,
++        interleaved=interleaved,
+     )
+ 
+ 
+

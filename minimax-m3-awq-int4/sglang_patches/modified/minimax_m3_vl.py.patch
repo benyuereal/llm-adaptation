@@ -1,4 +1,253 @@
---- Target: /usr/local/lib/python3.10/dist-packages/sglang/srt/models/minimax_m3_vl.py
-+++ Modified: minimax_m3_vl.py
-# Apply: cp minimax_m3_vl.py /usr/local/lib/python3.10/dist-packages/sglang/srt/models/minimax_m3_vl.py
-# This is the complete modified file, not a diff.
+--- a/sglang/srt/models/minimax_m3_vl.py	2026-07-29 13:56:50.571891864 +0800
++++ b/sglang/srt/models/minimax_m3_vl.py	2026-07-29 13:21:01.476886909 +0800
+@@ -1,4 +1,5 @@
+ # SPDX-License-Identifier: Apache-2.0
++# MiniMax M3 VL — vision tower + M3 (mixed sparse/dense MoE) text backbone.
+ 
+ import logging
+ from typing import Iterable, List, Optional, Tuple
+@@ -7,6 +8,7 @@
+ import torch.nn as nn
+ 
+ from sglang.srt.distributed import (
++    get_moe_expert_parallel_world_size,
+     get_pp_group,
+ )
+ from sglang.srt.layers.logits_processor import LogitsProcessor
+@@ -30,8 +32,6 @@
+ )
+ from sglang.srt.models.minimax_m3 import (
+     MiniMaxM3Model,
+-    MiniMaxM3SparseForCausalLM,
+-    build_minimax_fused_qkv_index,
+     get_spec_layer_idx_from_weight_name,
+ )
+ from sglang.srt.models.minimax_vl_common import (
+@@ -42,7 +42,7 @@
+     load_vision_weight,
+     merge_vit_qkv_weights,
+ )
+-from sglang.srt.runtime_context import get_parallel, get_server_args
++from sglang.srt.server_args import get_global_server_args
+ from sglang.srt.utils import add_prefix, get_device_sm, is_cuda, log_info_on_rank0
+ from sglang.srt.utils.hf_transformers_utils import get_rope_config
+ 
+@@ -54,6 +54,14 @@
+ 
+ 
+ class MiniMaxM3SparseForConditionalGeneration(nn.Module):
++    """MiniMax M3 VL: shared vision tower + M3 LLM with mixed sparse/dense attention.
++
++    Always loaded as the mixed sparse/dense backbone: which layers are sparse
++    vs dense is decided by ``config.text_config.sparse_attention_config``. A
++    checkpoint that omits ``sparse_attention_config`` will produce a pure-dense
++    model.
++    """
++
+     def __init__(
+         self,
+         config,
+@@ -65,7 +73,7 @@
+         self.quant_config = quant_config
+         self.pp_group = get_pp_group()
+ 
+-        self.use_data_parallel = get_server_args().mm_enable_dp_encoder
++        self.use_data_parallel = get_global_server_args().mm_enable_dp_encoder
+ 
+         self.num_fused_shared_experts = 0
+         self._determine_num_fused_shared_experts()
+@@ -91,12 +99,12 @@
+             projector_hidden_size=projector_hidden_size,
+             quant_config=None,
+             prefix=add_prefix("vision_tower", prefix),
+-            multimodal_projector_bias=getattr(
+-                config, "multimodal_projector_bias", True
+-            ),
+-            patch_merge_bias=getattr(config, "patch_merge_bias", True),
+         )
+ 
++        # Language model: M3 (with optional sparse attention).
++        # The unified MiniMaxM3Model reads ``text_config.sparse_attention_config``
++        # to decide per-layer whether to construct dense or sparse attention,
++        # so no branching is needed here.
+         text_config = config.text_config
+         self.model = MiniMaxM3Model(
+             config=text_config,
+@@ -110,7 +118,7 @@
+                 text_config.hidden_size,
+                 quant_config=quant_config,
+                 prefix=add_prefix("language_model.lm_head", prefix),
+-                use_attn_tp_group=get_server_args().enable_dp_lm_head,
++                use_attn_tp_group=get_global_server_args().enable_dp_lm_head,
+             )
+         else:
+             self.lm_head = PPMissingLayer()
+@@ -124,8 +132,7 @@
+ 
+     def _determine_num_fused_shared_experts(self) -> None:
+         text_config = self.config.text_config
+-        server_args = get_server_args()
+-        if server_args.disable_shared_experts_fusion:
++        if get_global_server_args().disable_shared_experts_fusion:
+             return
+ 
+         disable_reason = None
+@@ -133,9 +140,9 @@
+             disable_reason = "No shared experts are defined in the config."
+         elif not _is_cuda:
+             disable_reason = "Shared experts fusion currently requires CUDA devices."
+-        elif (_device_sm is not None) and (_device_sm < 80):
++        elif _is_cuda and (_device_sm is not None) and (_device_sm < 80):
+             disable_reason = "Shared experts fusion requires SM80 or newer GPUs."
+-        elif get_parallel().moe_ep_size > 1:
++        elif get_moe_expert_parallel_world_size() > 1:
+             disable_reason = (
+                 "Shared experts fusion is not supported together with expert "
+                 "parallelism yet."
+@@ -147,12 +154,7 @@
+             )
+ 
+         if disable_reason is not None:
+-            from sglang.srt.arg_groups.overrides import declare_load_time_override
+-
+-            declare_load_time_override(
+-                "MiniMaxM3VLForCausalLM._determine_num_fused_shared_experts",
+-                {"disable_shared_experts_fusion": True},
+-            )
++            get_global_server_args().disable_shared_experts_fusion = True
+             log_info_on_rank0(
+                 logger,
+                 f"{disable_reason} Shared experts fusion optimization is disabled.",
+@@ -165,15 +167,6 @@
+         ), "Only 1 fused shared expert is supported"
+         log_info_on_rank0(logger, "Shared experts fusion optimization enabled.")
+ 
+-    @classmethod
+-    def get_model_config_for_expert_location(cls, config):
+-        # EP asserts if this hook is absent on the top-level arch; VL nests the
+-        # LM config under text_config, so delegate there (fall back to config).
+-        text_config = getattr(config, "text_config", None) or config
+-        return MiniMaxM3SparseForCausalLM.get_model_config_for_expert_location(
+-            text_config
+-        )
+-
+     def pad_input_ids(self, input_ids: List[int], mm_inputs: MultimodalInputs):
+         return MultiModalityDataPaddingPatternMultimodalTokens().pad_input_tokens(
+             input_ids, mm_inputs
+@@ -226,6 +219,16 @@
+         return self.model.end_layer
+ 
+     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
++        """Load checkpoint weights for the vision tower and the M3 LLM.
++
++        M3 LLM differs from M2 in:
++        - MoE path is ``mlp.experts.*`` (not ``block_sparse_moe.experts.*``);
++          checkpoints saved with the M2 naming are remapped on the fly.
++        - Optional shared experts fusion: ``mlp.shared_experts`` is mapped onto
++          a synthetic ``mlp.experts.{num_local_experts}`` slot.
++        - PP layer skipping via ``get_layer_id``.
++        - MTP / spec-decode layers are skipped.
++        """
+         from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
+ 
+         # ``.qkv_proj`` (with the leading dot) prevents matching e.g.
+@@ -238,16 +241,6 @@
+             (".gate_up_proj", ".up_proj", 1),
+         ]
+ 
+-        if (
+-            getattr(self.config.text_config, "sparse_attention_config", None)
+-            is not None
+-        ):
+-            llm_stacked_params_mapping += [
+-                (".index_qkv_proj", ".index_q_proj", "q"),
+-                (".index_qkv_proj", ".index_k_proj", "k"),
+-                (".index_qkv_proj", ".index_v_proj", "v"),
+-            ]
+-
+         num_experts = getattr(self.config.text_config, "num_local_experts", 0)
+         expert_params_mapping = (
+             FusedMoE.make_expert_params_mapping(
+@@ -284,8 +277,6 @@
+ 
+         merge_vit_qkv_weights(vit_qkv_weights, vit_qkv_biases, params_dict)
+ 
+-        build_minimax_fused_qkv_index(self)
+-
+     def _load_llm_weight(
+         self,
+         name: str,
+@@ -294,9 +285,14 @@
+         llm_stacked_params_mapping: list,
+         expert_params_mapping: list,
+     ) -> None:
++        # Older checkpoints used the M2-style ``block_sparse_moe`` naming.
+         if "block_sparse_moe" in name:
+             name = name.replace("block_sparse_moe", "mlp")
+ 
++        # Checkpoint has "out_proj" for attention output, model uses "o_proj"
++        if "self_attn.out_proj." in name:
++            name = name.replace("self_attn.out_proj.", "self_attn.o_proj.")
++
+         layer_id = get_layer_id(name)
+         if layer_id is not None and (
+             layer_id < self.model.start_layer or layer_id >= self.model.end_layer
+@@ -322,12 +318,21 @@
+             if weight_name not in name:
+                 continue
+             if "mlp.experts." in name:
++                # Experts are handled by expert_params_mapping below.
+                 continue
+             new_name = name.replace(weight_name, param_name)
+             if new_name.endswith(".bias") and new_name not in params_dict:
+                 continue
+             if new_name not in params_dict:
+-                continue
++                # compressed-tensors uses weight_packed instead of weight
++                if new_name.endswith(".weight"):
++                    packed_name = new_name[:-len(".weight")] + ".weight_packed"
++                    if packed_name in params_dict:
++                        new_name = packed_name
++                    else:
++                        continue
++                else:
++                    continue
+             param = params_dict[new_name]
+             param.weight_loader(param, loaded_weight, shard_id)
+             return
+@@ -349,6 +354,14 @@
+                 shard_id=shard_id,
+                 expert_id=expert_id,
+             )
++            # Diagnostic: check zp param state after first load for layer 3
++            if "zero_point" in name and "layers.3." in name and "w13" in new_name and expert_id == 0 and shard_id == "w1":
++                import os
++                rank = os.environ.get("RANK", os.environ.get("LOCAL_RANK", "?"))
++                zp_data = param.data[0]  # expert 0
++                nz = (zp_data != 0).sum().item()
++                with open('/workspace/zp_load_diag.txt', 'a') as _f:
++                    _f.write(f"AFTER_LOAD rank={rank} name={name} param_nz={nz}/{zp_data.numel()} sample={zp_data[0,:4].tolist()} data_ptr={param.data.data_ptr()} param_id={id(param)}\n")
+             return
+         if is_expert_weight:
+             return
+@@ -359,8 +372,17 @@
+         if remapped is None:
+             return
+         if remapped not in params_dict:
+-            logger.warning(f"Parameter {remapped} not found in params_dict")
+-            return
++            # compressed-tensors uses weight_packed instead of weight
++            if remapped.endswith(".weight"):
++                packed_name = remapped[:-len(".weight")] + ".weight_packed"
++                if packed_name in params_dict:
++                    remapped = packed_name
++                else:
++                    logger.warning(f"Parameter {remapped} not found in params_dict")
++                    return
++            else:
++                logger.warning(f"Parameter {remapped} not found in params_dict")
++                return
+         param = params_dict[remapped]
+         weight_loader = getattr(param, "weight_loader", default_weight_loader)
+         try:
+

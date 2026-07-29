@@ -1,4 +1,151 @@
---- Target: /usr/local/lib/python3.10/dist-packages/sglang/srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16.py
-+++ Modified: compressed_tensors_wNa16.py
-# Apply: cp compressed_tensors_wNa16.py /usr/local/lib/python3.10/dist-packages/sglang/srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16.py
-# This is the complete modified file, not a diff.
+--- a/sglang/srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16.py	2026-07-29 13:56:50.513892243 +0800
++++ b/sglang/srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16.py	2026-07-29 13:35:36.266203769 +0800
+@@ -39,12 +39,61 @@
+     replace_parameter,
+     unpack_cols,
+ )
+-from sglang.srt.utils import is_cuda
++from sglang.srt.utils import is_cuda_alike as is_cuda, is_hip as _is_hip_fn
+ 
+ _is_cuda = is_cuda()
++_is_hip = _is_hip_fn()
+ 
+-if _is_cuda:
+-    from sglang.kernels.ops.quantization.gptq_marlin_repack import gptq_marlin_repack
++if _is_cuda and not _is_hip:
++    from sglang.jit_kernel.gptq_marlin_repack import gptq_marlin_repack
++
++if _is_hip:
++    pass
++
++
++def _ct_dequantize_hip(
++    qweight: torch.Tensor,
++    scales: torch.Tensor,
++    zeros,
++    num_bits: int,
++    pack_factor: int,
++    group_size: int,
++    K: int,
++    N: int,
++) -> torch.Tensor:
++    """Dequantize compressed-tensors pack_quantized format on HIP/DCU.
++
++    Layout:
++        qweight: [N, K // pack_factor] int32, sequential bit packing
++        scales:  [N, K // group_size] bf16/fp16
++        zeros:   [N // pack_factor, K // group_size] int32, packed same as qweight
++                 OR None (symmetric quantization)
++
++    Returns: [N, K] dequantized weight in scales.dtype
++    """
++    mask = (1 << num_bits) - 1
++    shifts = torch.arange(0, 32, num_bits, device=qweight.device, dtype=torch.int32)
++
++    unpacked = (qweight.unsqueeze(-1) >> shifts).to(torch.int32) & mask
++    unpacked = unpacked.reshape(N, K)
++
++    if zeros is not None:
++        zp_unpacked = (zeros.unsqueeze(-1) >> shifts).to(torch.int32) & mask
++        # zeros: [N//pack_factor, K_groups] -> after unpack: [N//pack_factor, K_groups, pack_factor]
++        # Need to merge nibble dim with N dim: permute to [N//pack_factor, pack_factor, K_groups] then reshape
++        num_groups = scales.shape[1]
++        zp_unpacked = zp_unpacked.permute(0, 2, 1).contiguous().reshape(-1, num_groups)
++        zp_unpacked = zp_unpacked[:N, :]
++    else:
++        zp_unpacked = torch.zeros(
++            N, K // group_size, device=qweight.device, dtype=torch.int32
++        )
++
++    zp_expanded = zp_unpacked.repeat_interleave(group_size, dim=1)[:, :K]
++    scales_expanded = scales.repeat_interleave(group_size, dim=1)[:, :K]
++
++    result = (unpacked.to(scales.dtype) - zp_expanded.to(scales.dtype)) * scales_expanded
++    return result
+ 
+ 
+ ScalarType, scalar_types = get_scalar_types()
+@@ -208,6 +257,11 @@
+     # Checkpoints are serialized in compressed-tensors format, which is
+     # different from the format the kernel may want. Handle repacking here.
+     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
++        # On HIP/DCU, skip Marlin repack — use Triton dequant path instead
++        if _is_hip:
++            self._process_weights_hip(layer)
++            return
++
+         # Default names since marlin requires empty parameters for these,
+         # TODO: remove this requirement from marlin (allow optional tensors)
+         self.w_q_name = "weight_packed"
+@@ -303,6 +357,10 @@
+ 
+     def apply_weights(self, layer: torch.nn.Module, x: torch.Tensor,
+                       bias: Optional[torch.Tensor]) -> torch.Tensor:
++        # HIP/DCU path: triton dequant + matmul
++        if _is_hip:
++            return self._apply_weights_hip(layer, x, bias)
++
+         c = self.kernel_config
+ 
+         def _get_weight_params(
+@@ -338,3 +396,59 @@
+             is_k_full=self.is_k_full,
+             bias=bias,
+         )
++
++    def _process_weights_hip(self, layer: torch.nn.Module) -> None:
++        """HIP/DCU: dequant INT4 to BF16 at load time, store as plain weight."""
++        w_q = getattr(layer, "weight_packed")
++        w_s = getattr(layer, "weight_scale")
++        w_zp = getattr(layer, "weight_zero_point", None)
++
++        pack_factor = self.pack_factor
++        num_bits = 32 // pack_factor
++        group_size = self.group_size
++        N, K_packed = w_q.shape
++        K = K_packed * pack_factor
++
++        # Dequant once and store as BF16
++        dequantized = _ct_dequantize_hip(
++            w_q.data, w_s.data, w_zp.data if w_zp is not None else None,
++            num_bits, pack_factor, group_size, K, N
++        )
++
++        # Replace quantized params with single BF16 weight
++        layer.weight_dequantized = torch.nn.Parameter(
++            dequantized.to(w_s.dtype).contiguous(), requires_grad=False
++        )
++        # Remove quantized params to free memory
++        del layer.weight_packed
++        del layer.weight_scale
++        if hasattr(layer, 'weight_zero_point'):
++            del layer.weight_zero_point
++
++    def _apply_weights_hip(self, layer: torch.nn.Module, x: torch.Tensor,
++                           bias: Optional[torch.Tensor]) -> torch.Tensor:
++        """HIP/DCU: direct BF16 matmul with pre-dequantized weight."""
++        weight = layer.weight_dequantized
++        out = torch.matmul(x.reshape(-1, x.shape[-1]), weight.t())
++        if bias is not None:
++            out.add_(bias)
++        return out.reshape(x.shape[:-1] + (weight.shape[0],))
++        K = K_packed * pack_factor
++
++        dequantized = _ct_dequantize_hip(
++            qweight, scales, zeros, num_bits, pack_factor, group_size, K, N
++        )
++
++        # Diagnostic: check dequantized weight stats (first call per layer)
++        if not getattr(layer, '_hip_dequant_val_diag_done', False):
++            layer._hip_dequant_val_diag_done = True
++            dq = dequantized.float()
++            with open('/workspace/attn_dequant_diag.txt', 'a') as _f:
++                _f.write(f"dequant: shape={list(dq.shape)} mean={dq.mean().item():.6f} std={dq.std().item():.6f} "
++                         f"min={dq.min().item():.4f} max={dq.max().item():.4f}\n\n")
++        out_shape = x.shape[:-1] + (N,)
++        reshaped_x = x.reshape(-1, x.shape[-1])
++        out = torch.matmul(reshaped_x, dequantized.t())
++        if bias is not None:
++            out.add_(bias)
++        return out.reshape(out_shape)
+
