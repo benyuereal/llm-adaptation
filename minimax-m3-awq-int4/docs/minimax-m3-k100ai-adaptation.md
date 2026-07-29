@@ -59,17 +59,24 @@ sglang serve \
 
 ---
 
-## 二、Patch 使用方法
-
-### 2.1 获取 Patch
+## 二、快速开始
 
 ```bash
+# 1. 拉取仓库
 cd /workspace
 git clone git@github.com:benyuereal/llm-adaptation.git
+
+# 2. 一键应用 patch
 cd llm-adaptation/minimax-m3-awq-int4
+bash apply_patch.sh
+
+# 3. 启动服务
+bash start.sh
 ```
 
-仓库结构：
+---
+
+## 三、仓库结构
 ```
 minimax-m3-awq-int4/
 ├── README.md                 # 概览
@@ -79,38 +86,11 @@ minimax-m3-awq-int4/
 ├── sglang_patches/
 │   ├── minimax-m3-awq-int4.patch  # unified diff（备用）
 │   ├── modified/             # 修改后的源文件 + 独立 .patch
-│   │   ├── compressed_tensors.py
-│   │   ├── compressed_tensors.py.patch
-│   │   ├── compressed_tensors_wNa16.py
-│   │   ├── compressed_tensors_wNa16.py.patch
-│   │   ├── compressed_tensors_wNa16_moe.py
-│   │   ├── compressed_tensors_wNa16_moe.py.patch
-│   │   ├── configuration_utils.py
-│   │   ├── configuration_utils.py.patch
-│   │   ├── fused_moe.py
-│   │   ├── fused_moe.py.patch
-│   │   ├── minimax_m3.py
-│   │   ├── minimax_m3.py.patch
-│   │   ├── minimax_m3_vl.py
-│   │   └── minimax_m3_vl.py.patch
+│   ├── added/                # 新增文件（MoE kernel config 等）
 │   └── diagnostics/          # 诊断埋点备份（调试用）
 ```
 
-### 2.2 一键应用（推荐）
-
-```bash
-bash apply_patch.sh
-```
-
-脚本会将 `sglang_patches/modified/` 下的文件复制到对应位置，并自动备份原文件（`.bak`）。
-
-### 2.3 启动服务
-
-```bash
-bash start.sh
-```
-
-### 2.4 手动应用（备用）
+`apply_patch.sh` 会将 `modified/` 下的文件复制到对应位置，并自动备份原文件（`.bak`）。
 
 如需手动操作：
 
@@ -128,7 +108,7 @@ cp $PATCH_DIR/fused_moe.py                $SGLANG_ROOT/layers/moe/moe_runner/tri
 cp $PATCH_DIR/configuration_utils.py      $TRANSFORMERS_ROOT/configuration_utils.py
 ```
 
-### 2.5 修改文件列表
+### 修改文件列表
 
 | 文件 | 包 | 修改内容 |
 |------|-----|----------|
