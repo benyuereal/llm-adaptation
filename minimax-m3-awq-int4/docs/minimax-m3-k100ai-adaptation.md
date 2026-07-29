@@ -305,4 +305,21 @@ zp_unpacked = zp_unpacked[:N, :]
 | 显存配置 | `mem_fraction_static=0.55`，每卡权重约 30GB |
 | 残留进程 | 启动前确认：`ps aux \| grep sglang` |
 | CUDA Graph | 捕获 bs=1-8，首次请求触发 graph capture |
-| 诊断埋点 | 备份在 `/workspace/patch/diagnostics/`，需要时可恢复 |
+| 诊断埋点 | 备份在 `sglang_patches/diagnostics/`，需要时可恢复 |
+
+### MoE Kernel Config（可选，性能调优）
+
+仓库中 `sglang_patches/added/configs/` 包含 K100_AI 上 autotuning 得到的 MoE kernel 配置：
+- `E=128,N=192,device_name=K100_AI,dtype=int4_w4a16.json`
+- `E=128,N=192,device_name=K100_AI,dtype=int4_w4a16_down.json`
+
+**默认不启用**（不影响精度，仅影响性能）。如需启用：
+
+```bash
+# 方法一：取消 apply_patch.sh 中 config 相关行的注释后重新执行
+# 方法二：手动复制
+CONFIG_DIR=/usr/local/lib/python3.10/dist-packages/sglang/srt/layers/moe/moe_runner/triton_utils/configs/triton_3_5_1
+cp sglang_patches/added/configs/*.json $CONFIG_DIR/
+```
+
+不启用时日志会提示 "Using default MoE kernel config. Performance might be sub-optimal!"，可忽略。
