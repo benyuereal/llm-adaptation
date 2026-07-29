@@ -1,0 +1,2739 @@
+--- a/sglang/srt/layers/quantization/compressed_tensors/compressed_tensors.py	2026-07-29 13:56:50.512892249 +0800
++++ b/sglang/srt/layers/quantization/compressed_tensors/compressed_tensors.py	2026-07-29 11:26:01.084977728 +0800
+@@ -44,7 +44,6 @@
+     CompressedTensorsMxInt4MoE,
+     CompressedTensorsW4A4Fp4,
+     CompressedTensorsW4A4Nvfp4MoE,
+-    CompressedTensorsW4AFP8MoE,
+     CompressedTensorsW8A8Fp8,
+     CompressedTensorsW8A8Fp8MoE,
+     CompressedTensorsW8A8Int8,
+@@ -146,7 +145,7 @@
+     def get_scaled_act_names(self) -> List[str]:
+         return []
+ 
+-    def apply_weight_name_mapper(self, hf_to_sglang_mapper: WeightsMapper):
++    def apply_weight_name_mapper(self, hf_to_sglang_mapper: "WeightsMapper"):
+         self.target_scheme_map = hf_to_sglang_mapper.apply_dict(self.target_scheme_map)
+         self.ignore = hf_to_sglang_mapper.apply_list(self.ignore)
+         self.sparsity_scheme_map = hf_to_sglang_mapper.apply_dict(
+@@ -307,16 +306,15 @@
+                 target_scheme_map[target]["input_activations"] = None
+                 if is_activation_quantization_format(quant_format):
+                     input_activations = quant_config.get("input_activations")
+-                    # When activation quant format is set but no
+-                    # input_activations provided: valid for w8a16fp8 (FLOAT
+-                    # weights) and pack-quantized without activation quant
+-                    # (INT weights, W4A16 style).
++                    # The only case where we have activation quant supported
++                    # but no input_activations provided in the config
++                    # should be w8a16fp8 w8a16fp8 can also run for cases where
++                    # there is an input_quant but it is ignored
+                     if not input_activations:
+-                        weight_type = target_scheme_map[target]["weights"].type
+-                        if weight_type == QuantizationType.INT:
+-                            pass
+-                        else:
+-                            assert weight_type == QuantizationType.FLOAT
++                        assert (
++                            target_scheme_map[target]["weights"].type
++                            == QuantizationType.FLOAT
++                        )
+                     else:
+                         target_scheme_map[target]["input_activations"] = (
+                             QuantizationArgs.model_validate(  # noqa: E501
+@@ -367,33 +365,6 @@
+             and is_dynamic
+         )
+ 
+-    def _is_wint4afp8(self, weight_quant: BaseModel, input_quant: BaseModel) -> bool:
+-        """Detect W4AFP8: packed INT4 weights + 8-bit dynamic per-token activations."""
+-        if weight_quant is None or input_quant is None:
+-            return False
+-        return (
+-            self.quant_format == CompressionFormat.pack_quantized.value
+-            and weight_quant.num_bits == 4
+-            and weight_quant.type == QuantizationType.INT
+-            and weight_quant.symmetric
+-            and not weight_quant.dynamic
+-            and input_quant.num_bits == 8
+-            and input_quant.type in [QuantizationType.FLOAT, QuantizationType.INT]
+-            and input_quant.dynamic  # currently not support static input scales
+-        )
+-
+-    def _is_wint4abf16(self, weight_quant: BaseModel, input_quant: BaseModel) -> bool:
+-        """Detect W4A16: packed INT4 weights with no activation quantization (activations stay BF16)."""
+-        if weight_quant is None or input_quant is not None:
+-            return False
+-        return (
+-            self.quant_format == CompressionFormat.pack_quantized.value
+-            and weight_quant.num_bits == 4
+-            and weight_quant.type == QuantizationType.INT
+-            and weight_quant.symmetric
+-            and not weight_quant.dynamic
+-        )
+-
+     def _is_static_tensor_w8a8(
+         self, weight_quant: BaseModel, input_quant: BaseModel
+     ) -> bool:
+@@ -530,9 +501,6 @@
+         )
+         is_static = not weight_quant.dynamic
+ 
+-        # Both symmetric and asymmetric weight quant are handled by
+-        # CompressedTensorsWNA16 via the Marlin kernel path; asymmetric
+-        # checkpoints carry a weight zero-point.
+         return is_channel_group and input_quant_none and is_static
+ 
+     def _is_mxint4a16(self, weight_quant: BaseModel, input_quant: BaseModel) -> bool:
+@@ -585,8 +553,8 @@
+                     num_bits=weight_quant.num_bits,
+                     strategy=weight_quant.strategy,
+                     group_size=weight_quant.group_size,
+-                    symmetric=weight_quant.symmetric,
+                     actorder=weight_quant.actorder,
++                    symmetric=weight_quant.symmetric,
+                 )
+             else:
+                 raise ImportError(
+@@ -711,12 +679,10 @@
+                     logger.info_once(
+                         "Using CompressedTensorsMxInt4MoE with flashinfer_trtllm backend"
+                     )
+-                    return CompressedTensorsMxInt4MoE(self, weight_quant=weight_quant)
++                    return CompressedTensorsMxInt4MoE(self)
+                 elif _is_hip:
+                     logger.info_once("Using CompressedTensorsWNA16TritonMoE (ROCm)")
+-                    return CompressedTensorsWNA16TritonMoE(
+-                        self, weight_quant=weight_quant
+-                    )
++                    return CompressedTensorsWNA16TritonMoE(self)
+                 else:
+                     moe_backend = get_moe_runner_backend()
+                     if moe_backend.is_triton():
+@@ -724,11 +690,9 @@
+                             "Using CompressedTensorsWNA16TritonMoE "
+                             "(moe_runner_backend=triton)"
+                         )
+-                        return CompressedTensorsWNA16TritonMoE(
+-                            self, weight_quant=weight_quant
+-                        )
++                        return CompressedTensorsWNA16TritonMoE(self)
+                     logger.info_once("Using CompressedTensorsWNA16MarlinMoEMethod")
+-                    return CompressedTensorsWNA16MoE(self, weight_quant=weight_quant)
++                    return CompressedTensorsWNA16MoE(self)
+             else:
+                 if (
+                     self._is_dynamic_token_w4(weight_quant, input_quant)
+@@ -750,13 +714,6 @@
+                 raise NotImplementedError(
+                     f"The W8A8Int8 Fused MoE scheme is implemented only for NPU for now."
+                 )
+-        elif self._is_wint4afp8(weight_quant, input_quant):
+-            # On NPU prefer the dedicated NPU W4A8Int8 path when activations are INT8.
+-            if _is_npu and self._is_dynamic_token_w4a8(weight_quant, input_quant):
+-                logger.info_once("Using NPUCompressedTensorsW4A8Int8DynamicMoE")
+-                return NPUCompressedTensorsW4A8Int8DynamicMoE(self)
+-            logger.info_once("Using CompressedTensorsW4AFP8MoE")
+-            return CompressedTensorsW4AFP8MoE(self, weight_quant, input_quant)
+         elif self._is_dynamic_token_w4a8(weight_quant, input_quant):
+             if _is_npu:
+                 logger.info_once("Using NPUCompressedTensorsW4A8Int8DynamicMoE")
+@@ -1035,7 +992,6 @@
+         the necessary parameters for the layer. See LinearMethodBase for param
+         details
+         """
+-        self.load_up_proj_weight_first = layer.scheme.load_up_proj_weight_first
+         layer.scheme.create_weights(
+             layer=layer,
+             num_experts=num_experts,
+@@ -1067,6 +1023,7 @@
+         layer input.  See LinearMethodBase for param details
+ 
+         """
++
+         scheme = layer.scheme
+         if scheme is None:
+             raise ValueError("A scheme must be defined for each layer")
+
+--- a/sglang/srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16.py	2026-07-29 13:56:50.513892243 +0800
++++ b/sglang/srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16.py	2026-07-29 13:35:36.266203769 +0800
+@@ -39,12 +39,61 @@
+     replace_parameter,
+     unpack_cols,
+ )
+-from sglang.srt.utils import is_cuda
++from sglang.srt.utils import is_cuda_alike as is_cuda, is_hip as _is_hip_fn
+ 
+ _is_cuda = is_cuda()
++_is_hip = _is_hip_fn()
+ 
+-if _is_cuda:
+-    from sglang.kernels.ops.quantization.gptq_marlin_repack import gptq_marlin_repack
++if _is_cuda and not _is_hip:
++    from sglang.jit_kernel.gptq_marlin_repack import gptq_marlin_repack
++
++if _is_hip:
++    pass
++
++
++def _ct_dequantize_hip(
++    qweight: torch.Tensor,
++    scales: torch.Tensor,
++    zeros,
++    num_bits: int,
++    pack_factor: int,
++    group_size: int,
++    K: int,
++    N: int,
++) -> torch.Tensor:
++    """Dequantize compressed-tensors pack_quantized format on HIP/DCU.
++
++    Layout:
++        qweight: [N, K // pack_factor] int32, sequential bit packing
++        scales:  [N, K // group_size] bf16/fp16
++        zeros:   [N // pack_factor, K // group_size] int32, packed same as qweight
++                 OR None (symmetric quantization)
++
++    Returns: [N, K] dequantized weight in scales.dtype
++    """
++    mask = (1 << num_bits) - 1
++    shifts = torch.arange(0, 32, num_bits, device=qweight.device, dtype=torch.int32)
++
++    unpacked = (qweight.unsqueeze(-1) >> shifts).to(torch.int32) & mask
++    unpacked = unpacked.reshape(N, K)
++
++    if zeros is not None:
++        zp_unpacked = (zeros.unsqueeze(-1) >> shifts).to(torch.int32) & mask
++        # zeros: [N//pack_factor, K_groups] -> after unpack: [N//pack_factor, K_groups, pack_factor]
++        # Need to merge nibble dim with N dim: permute to [N//pack_factor, pack_factor, K_groups] then reshape
++        num_groups = scales.shape[1]
++        zp_unpacked = zp_unpacked.permute(0, 2, 1).contiguous().reshape(-1, num_groups)
++        zp_unpacked = zp_unpacked[:N, :]
++    else:
++        zp_unpacked = torch.zeros(
++            N, K // group_size, device=qweight.device, dtype=torch.int32
++        )
++
++    zp_expanded = zp_unpacked.repeat_interleave(group_size, dim=1)[:, :K]
++    scales_expanded = scales.repeat_interleave(group_size, dim=1)[:, :K]
++
++    result = (unpacked.to(scales.dtype) - zp_expanded.to(scales.dtype)) * scales_expanded
++    return result
+ 
+ 
+ ScalarType, scalar_types = get_scalar_types()
+@@ -208,6 +257,11 @@
+     # Checkpoints are serialized in compressed-tensors format, which is
+     # different from the format the kernel may want. Handle repacking here.
+     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
++        # On HIP/DCU, skip Marlin repack — use Triton dequant path instead
++        if _is_hip:
++            self._process_weights_hip(layer)
++            return
++
+         # Default names since marlin requires empty parameters for these,
+         # TODO: remove this requirement from marlin (allow optional tensors)
+         self.w_q_name = "weight_packed"
+@@ -303,6 +357,10 @@
+ 
+     def apply_weights(self, layer: torch.nn.Module, x: torch.Tensor,
+                       bias: Optional[torch.Tensor]) -> torch.Tensor:
++        # HIP/DCU path: triton dequant + matmul
++        if _is_hip:
++            return self._apply_weights_hip(layer, x, bias)
++
+         c = self.kernel_config
+ 
+         def _get_weight_params(
+@@ -338,3 +396,59 @@
+             is_k_full=self.is_k_full,
+             bias=bias,
+         )
++
++    def _process_weights_hip(self, layer: torch.nn.Module) -> None:
++        """HIP/DCU: dequant INT4 to BF16 at load time, store as plain weight."""
++        w_q = getattr(layer, "weight_packed")
++        w_s = getattr(layer, "weight_scale")
++        w_zp = getattr(layer, "weight_zero_point", None)
++
++        pack_factor = self.pack_factor
++        num_bits = 32 // pack_factor
++        group_size = self.group_size
++        N, K_packed = w_q.shape
++        K = K_packed * pack_factor
++
++        # Dequant once and store as BF16
++        dequantized = _ct_dequantize_hip(
++            w_q.data, w_s.data, w_zp.data if w_zp is not None else None,
++            num_bits, pack_factor, group_size, K, N
++        )
++
++        # Replace quantized params with single BF16 weight
++        layer.weight_dequantized = torch.nn.Parameter(
++            dequantized.to(w_s.dtype).contiguous(), requires_grad=False
++        )
++        # Remove quantized params to free memory
++        del layer.weight_packed
++        del layer.weight_scale
++        if hasattr(layer, 'weight_zero_point'):
++            del layer.weight_zero_point
++
++    def _apply_weights_hip(self, layer: torch.nn.Module, x: torch.Tensor,
++                           bias: Optional[torch.Tensor]) -> torch.Tensor:
++        """HIP/DCU: direct BF16 matmul with pre-dequantized weight."""
++        weight = layer.weight_dequantized
++        out = torch.matmul(x.reshape(-1, x.shape[-1]), weight.t())
++        if bias is not None:
++            out.add_(bias)
++        return out.reshape(x.shape[:-1] + (weight.shape[0],))
++        K = K_packed * pack_factor
++
++        dequantized = _ct_dequantize_hip(
++            qweight, scales, zeros, num_bits, pack_factor, group_size, K, N
++        )
++
++        # Diagnostic: check dequantized weight stats (first call per layer)
++        if not getattr(layer, '_hip_dequant_val_diag_done', False):
++            layer._hip_dequant_val_diag_done = True
++            dq = dequantized.float()
++            with open('/workspace/attn_dequant_diag.txt', 'a') as _f:
++                _f.write(f"dequant: shape={list(dq.shape)} mean={dq.mean().item():.6f} std={dq.std().item():.6f} "
++                         f"min={dq.min().item():.4f} max={dq.max().item():.4f}\n\n")
++        out_shape = x.shape[:-1] + (N,)
++        reshaped_x = x.reshape(-1, x.shape[-1])
++        out = torch.matmul(reshaped_x, dequantized.t())
++        if bias is not None:
++            out.add_(bias)
++        return out.reshape(out_shape)
+
+--- a/sglang/srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16_moe.py	2026-07-29 13:56:50.513892243 +0800
++++ b/sglang/srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16_moe.py	2026-07-29 09:35:05.200076408 +0800
+@@ -8,29 +8,20 @@
+ import torch
+ from compressed_tensors import CompressionFormat
+ 
+-from sglang.srt.hardware_backend.gpu.quantization.gptq_kernels import (
+-    gptq_marlin_moe_repack,
++from sglang.srt.hardware_backend.npu.quantization.fused_moe_method_npu import (
++    NPUW4A16Int4DynamicMoEMethod,
+ )
+-from sglang.srt.hardware_backend.npu.quantization.moe_methods import (
+-    NPUWNA16Int4MoEMethod,
+-)
+-from sglang.srt.layers.moe.moe_runner import MoeRunner, MoeRunnerConfig
+-from sglang.srt.layers.moe.utils import MoeRunnerBackend, get_moe_runner_backend
++from sglang.srt.layers.moe import MoeRunner, MoeRunnerBackend, MoeRunnerConfig
+ from sglang.srt.layers.quantization.compressed_tensors.schemes import (
+     WNA16_SUPPORTED_BITS,
+     CompressedTensorsMoEScheme,
+ )
+-from sglang.srt.layers.quantization.marlin_utils import (
+-    marlin_make_workspace,
+-    marlin_moe_permute_scales,
+-    moe_awq_to_marlin_zero_points,
+-)
++from sglang.srt.layers.quantization.gptq import gptq_marlin_moe_repack
++from sglang.srt.layers.quantization.marlin_utils import marlin_moe_permute_scales
+ from sglang.srt.layers.quantization.utils import replace_parameter
+ from sglang.srt.utils import get_bool_env_var, is_cuda, is_hip, set_weight_attrs
+ 
+ if TYPE_CHECKING:
+-    from compressed_tensors.quantization import QuantizationArgs
+-
+     from sglang.srt.layers.moe.token_dispatcher import (
+         CombineInput,
+         StandardDispatchOutput,
+@@ -39,6 +30,7 @@
+         CompressedTensorsConfig,
+     )
+ 
++
+ __all__ = [
+     "CompressedTensorsWNA16MoE",
+     "CompressedTensorsWNA16TritonMoE",
+@@ -64,22 +56,15 @@
+ 
+ class CompressedTensorsWNA16MoE(CompressedTensorsMoEScheme):
+ 
+-    def __init__(
+-        self,
+-        quant_config: CompressedTensorsConfig,
+-        weight_quant: QuantizationArgs,
+-        num_gpu_experts: int = -1,
+-    ):
++    def __init__(self, quant_config: CompressedTensorsConfig, num_gpu_experts=-1):
+         self.quant_config = quant_config
+-        # Per-layer scheme already resolved by get_moe_scheme(); reuse it directly
+-        # (mixed-precision MoE has no "Linear" config group to fall back on).
+-        config = weight_quant
++        config = self.quant_config.target_scheme_map["Linear"].get("weights")
+         self.num_bits = config.num_bits
+         self.packed_factor = 32 // config.num_bits
+         self.strategy = config.strategy
+         self.group_size = config.group_size
+         self.actorder = config.actorder
+-        self.sym = config.symmetric
++        self.symmetric = config.symmetric
+ 
+         if not (
+             self.quant_config.quant_format == CompressionFormat.pack_quantized.value
+@@ -139,11 +124,7 @@
+ 
+         # In the case where we have actorder/g_idx,
+         # we do not partition the w2 scales
+-        load_full_w2 = (
+-            self.actorder is not None
+-            and self.actorder != "static"
+-            and self.group_size != -1
+-        )
++        load_full_w2 = self.actorder and self.group_size != -1
+ 
+         if load_full_w2:
+             w2_scales_size = intermediate_size_per_partition * layer.moe_tp_size
+@@ -179,43 +160,47 @@
+         set_weight_attrs(w2_scale, extra_weight_attrs)
+         set_weight_attrs(w2_scale, {"load_full_w2": load_full_w2})
+ 
+-        w2_weight_shape = torch.nn.Parameter(
+-            torch.empty(num_experts, 2), requires_grad=False
+-        )
+-        layer.register_parameter("w2_weight_shape", w2_weight_shape)
+-        set_weight_attrs(w2_weight_shape, extra_weight_attrs)
+-        w13_weight_shape = torch.nn.Parameter(
+-            torch.empty(num_experts, 2), requires_grad=False
+-        )
+-
+-        layer.register_parameter("w13_weight_shape", w13_weight_shape)
+-        set_weight_attrs(w13_weight_shape, extra_weight_attrs)
+-
+-        # add zero param
+-        if not self.sym:
+-            w13_qzeros = torch.nn.Parameter(
+-                torch.empty(
++        # Zero points for asymmetric quantization
++        # Checkpoint per-expert zp: [N//8, K//group_size] int32
++        # Loader will transpose to [K//group_size, N//8] then TP-shard on dim 1
++        # Final param shape: [E, K//group_size, N_tp//8] where N_tp = 2*intermediate_per_partition
++        if not self.symmetric:
++            zp_pack_factor = 8
++            w13_zp = torch.nn.Parameter(
++                torch.zeros(
+                     num_experts,
+                     num_groups_w13,
+-                    2 * intermediate_size_per_partition // self.packed_factor,
++                    2 * intermediate_size_per_partition // zp_pack_factor,
+                     dtype=torch.int32,
+                 ),
+                 requires_grad=False,
+             )
+-            layer.register_parameter("w13_weight_zero_point", w13_qzeros)
+-            set_weight_attrs(w13_qzeros, extra_weight_attrs)
++            layer.register_parameter("w13_weight_zero_point", w13_zp)
++            set_weight_attrs(w13_zp, extra_weight_attrs)
+ 
+-            w2_qzeros = torch.nn.Parameter(
+-                torch.empty(
++            w2_zp = torch.nn.Parameter(
++                torch.zeros(
+                     num_experts,
+                     num_groups_w2,
+-                    hidden_size // self.packed_factor,
++                    hidden_size // zp_pack_factor,
+                     dtype=torch.int32,
+                 ),
+                 requires_grad=False,
+             )
+-            layer.register_parameter("w2_weight_zero_point", w2_qzeros)
+-            set_weight_attrs(w2_qzeros, extra_weight_attrs)
++            layer.register_parameter("w2_weight_zero_point", w2_zp)
++            set_weight_attrs(w2_zp, extra_weight_attrs)
++
++        w2_weight_shape = torch.nn.Parameter(
++            torch.empty(num_experts, 2), requires_grad=False
++        )
++        layer.register_parameter("w2_weight_shape", w2_weight_shape)
++        set_weight_attrs(w2_weight_shape, extra_weight_attrs)
++        w13_weight_shape = torch.nn.Parameter(
++            torch.empty(num_experts, 2), requires_grad=False
++        )
++
++        layer.register_parameter("w13_weight_shape", w13_weight_shape)
++        set_weight_attrs(w13_weight_shape, extra_weight_attrs)
+ 
+         w13_g_idx = torch.nn.Parameter(
+             torch.empty(
+@@ -276,10 +261,6 @@
+         layer._original_shapes["w2_weight_scale"] = tuple(w2_scale.shape)
+         layer._original_shapes["w13_weight_scale"] = tuple(w13_scale.shape)
+ 
+-        if not self.sym:
+-            layer._original_shapes["w13_weight_zero_point"] = w13_qzeros.shape
+-            layer._original_shapes["w2_weight_zero_point"] = tuple(w2_qzeros.shape)
+-
+     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+ 
+         # Skip if the layer is already converted to Marlin format to prevent double-packing.
+@@ -383,25 +364,6 @@
+         )
+         replace_tensor("w2_weight_scale", marlin_w2_scales)
+ 
+-        # Repack zero
+-        if not self.sym:
+-            marlin_w13_zp = moe_awq_to_marlin_zero_points(
+-                layer.w13_weight_zero_point,
+-                size_k=layer.w13_weight_zero_point.shape[1],
+-                size_n=layer.w13_weight_zero_point.shape[2] * self.packed_factor,
+-                num_bits=self.num_bits,
+-            )
+-            replace_tensor("w13_weight_zero_point", marlin_w13_zp)
+-
+-            marlin_w2_zp = moe_awq_to_marlin_zero_points(
+-                layer.w2_weight_zero_point,
+-                size_k=layer.w2_weight_zero_point.shape[1],
+-                size_n=layer.w2_weight_zero_point.shape[2] * self.packed_factor,
+-                num_bits=self.num_bits,
+-            )
+-            replace_tensor("w2_weight_zero_point", marlin_w2_zp)
+-
+-        layer.workspace = marlin_make_workspace(layer.w13_weight_packed.device, 4)
+         layer.is_marlin_converted = True
+ 
+     def restore_weights_before_loading(self, layer: torch.nn.Module):
+@@ -438,8 +400,6 @@
+             w13_g_idx=getattr(layer, "w13_weight_g_idx", None),
+             w2_g_idx=getattr(layer, "w2_weight_g_idx", None),
+             is_k_full=self.is_k_full,
+-            w13_qzeros=layer.w13_weight_zero_point if not self.sym else None,
+-            w2_qzeros=layer.w2_weight_zero_point if not self.sym else None,
+         )
+ 
+     def apply_weights(
+@@ -486,13 +446,9 @@
+             g_idx2=layer.w2_weight_g_idx,
+             sort_indices1=layer.w13_g_idx_sort_indices,
+             sort_indices2=layer.w2_g_idx_sort_indices,
+-            w1_zeros=layer.w13_weight_zero_point if not self.sym else None,
+-            w2_zeros=layer.w2_weight_zero_point if not self.sym else None,
+             num_bits=self.num_bits,
+             is_k_full=self.is_k_full,
+             routed_scaling_factor=self.moe_runner_config.routed_scaling_factor,
+-            clamp_limit=self.moe_runner_config.swiglu_limit,
+-            workspace=layer.workspace,
+         )
+         return StandardCombineInput(hidden_states=output)
+ 
+@@ -500,16 +456,34 @@
+ class CompressedTensorsWNA16TritonMoE(CompressedTensorsWNA16MoE):
+     """ROCm/HIP-compatible W4A16 MoE method using Triton kernels instead of Marlin.
+ 
+-    Inherits weight creation from CompressedTensorsWNA16MoE but converts
+-    weights to the uint8-packed format expected by the Triton fused MoE kernel
+-    instead of the Marlin-specific format.
++    Keeps INT4 packed weights in VRAM. At inference time, passes packed weights
++    + scales directly to the Triton fused MoE kernel which performs dequant
++    inside the kernel (use_int4_w4a16=True).
+     """
+ 
+     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+         if getattr(layer, "is_triton_converted", False):
+             return
+ 
+-        num_experts = layer.w13_weight_packed.shape[0]
++        # Pre-conversion diagnostic: check which layers have zero zp
++        if hasattr(layer, "w13_weight_zero_point") and layer.w13_weight_zero_point is not None:
++            if not hasattr(CompressedTensorsWNA16TritonMoE, '_pre_conv_count'):
++                CompressedTensorsWNA16TritonMoE._pre_conv_count = 0
++            CompressedTensorsWNA16TritonMoE._pre_conv_count += 1
++            cnt = CompressedTensorsWNA16TritonMoE._pre_conv_count
++            raw = layer.w13_weight_zero_point.data
++            all_zero = (raw == 0).all().item()
++            nz_experts = sum(1 for ei in range(raw.shape[0]) if (raw[ei] != 0).any())
++            if all_zero or cnt <= 5:
++                import os
++                rank = os.environ.get("RANK", os.environ.get("LOCAL_RANK", "?"))
++                with open('/workspace/zp_preconv_diag.txt', 'a') as _f:
++                    _f.write(
++                        f"layer_ord={cnt} rank={rank} all_zero={all_zero} "
++                        f"nz_experts={nz_experts}/{raw.shape[0]} "
++                        f"shape={list(raw.shape)} sample_e0={raw[0,0,:4].tolist()} "
++                        f"data_ptr={raw.data_ptr()} param_id={id(layer.w13_weight_zero_point)}\n"
++                    )
+ 
+         # Convert w13 weights: [E, K//8, N] int32 -> [E, N, K//2] uint8
+         w13 = layer.w13_weight_packed.data
+@@ -531,8 +505,84 @@
+         w2_scale = w2_scale.transpose(1, 2).contiguous()
+         layer.w2_weight_scale = torch.nn.Parameter(w2_scale, requires_grad=False)
+ 
++        # Convert zero points: [E, K_groups, N_tp//8] int32 → [E, N_tp//2, K_groups] uint8
++        # Each int32 has 8 nibbles for 8 N positions; each byte has 2 nibbles
++        if hasattr(layer, "w13_weight_zero_point") and layer.w13_weight_zero_point is not None:
++            w13_zp = layer.w13_weight_zero_point.data  # [E, K_groups, N_tp//8] int32
++            # Fill zero experts with default zp=8 (each nibble = 8 → each byte = 0x88)
++            # Check per-expert to avoid masking partially-loaded layers
++            num_zero_experts = 0
++            for ei in range(w13_zp.shape[0]):
++                if (w13_zp[ei] == 0).all():
++                    w13_zp[ei].view(torch.uint8).fill_(0x88)
++                    num_zero_experts += 1
++            if num_zero_experts > 0:
++                logger.warning(
++                    f"w13_zp: {num_zero_experts}/{w13_zp.shape[0]} experts had zero zp, "
++                    f"filled with default zp=8. Shape={w13_zp.shape}"
++                )
++            w13_zp = w13_zp.transpose(1, 2).contiguous()  # [E, N_tp//8, K_groups]
++            E_zp, Npack, Kgroups = w13_zp.shape
++            zp_u8 = w13_zp.view(torch.uint8).reshape(E_zp, Npack, Kgroups, 4)
++            zp_u8 = zp_u8.permute(0, 1, 3, 2).contiguous().reshape(E_zp, Npack * 4, Kgroups)
++            layer.w13_weight_zero_point = torch.nn.Parameter(zp_u8, requires_grad=False)
++
++        if hasattr(layer, "w2_weight_zero_point") and layer.w2_weight_zero_point is not None:
++            w2_zp = layer.w2_weight_zero_point.data
++            num_zero_experts = 0
++            for ei in range(w2_zp.shape[0]):
++                if (w2_zp[ei] == 0).all():
++                    w2_zp[ei].view(torch.uint8).fill_(0x88)
++                    num_zero_experts += 1
++            if num_zero_experts > 0:
++                logger.warning(
++                    f"w2_zp: {num_zero_experts}/{w2_zp.shape[0]} experts had zero zp, "
++                    f"filled with default zp=8. Shape={w2_zp.shape}"
++                )
++            w2_zp = w2_zp.transpose(1, 2).contiguous()
++            E_zp, Npack, Kgroups = w2_zp.shape
++            zp_u8 = w2_zp.view(torch.uint8).reshape(E_zp, Npack, Kgroups, 4)
++            zp_u8 = zp_u8.permute(0, 1, 3, 2).contiguous().reshape(E_zp, Npack * 4, Kgroups)
++            layer.w2_weight_zero_point = torch.nn.Parameter(zp_u8, requires_grad=False)
++
+         layer.is_triton_converted = True
+ 
++        # Debug: dump zp data for ALL layers
++        if hasattr(layer, "w13_weight_zero_point"):
++            if not hasattr(CompressedTensorsWNA16TritonMoE, '_zp_dump_count'):
++                CompressedTensorsWNA16TritonMoE._zp_dump_count = 0
++                CompressedTensorsWNA16TritonMoE._zp_nonzero_layers = 0
++                CompressedTensorsWNA16TritonMoE._zp_zero_layers = 0
++                CompressedTensorsWNA16TritonMoE._zp_zero_expert_info = []
++            CompressedTensorsWNA16TritonMoE._zp_dump_count += 1
++            raw = layer.w13_weight_zero_point.data
++            nz = (raw != 0).sum().item()
++            # Count per-expert zeros (after fill, should be 0x88 not zero)
++            zero_experts = []
++            for ei in range(raw.shape[0]):
++                if (raw[ei] == 0).all():
++                    zero_experts.append(ei)
++            if nz > 0 and not zero_experts:
++                CompressedTensorsWNA16TritonMoE._zp_nonzero_layers += 1
++            else:
++                CompressedTensorsWNA16TritonMoE._zp_zero_layers += 1
++                CompressedTensorsWNA16TritonMoE._zp_zero_expert_info.append({
++                    'layer_idx': CompressedTensorsWNA16TritonMoE._zp_dump_count - 1,
++                    'zero_experts': zero_experts[:10],
++                    'total_zero': len(zero_experts),
++                })
++            # Dump summary on last layer
++            if CompressedTensorsWNA16TritonMoE._zp_dump_count == 57:
++                torch.save({
++                    'total_layers': 57,
++                    'nonzero_layers': CompressedTensorsWNA16TritonMoE._zp_nonzero_layers,
++                    'zero_layers': CompressedTensorsWNA16TritonMoE._zp_zero_layers,
++                    'zero_expert_info': CompressedTensorsWNA16TritonMoE._zp_zero_expert_info,
++                    'last_layer_nonzero': nz,
++                    'last_layer_total': raw.numel(),
++                    'last_layer_sample': raw[0, :4, :4].cpu().clone(),
++                }, '/workspace/zp_all_layers.pt')
++
+     def create_moe_runner(
+         self, layer: torch.nn.Module, moe_runner_config: MoeRunnerConfig
+     ):
+@@ -542,12 +592,17 @@
+     def get_triton_quant_info(self, layer):
+         from sglang.srt.layers.moe.moe_runner.triton import TritonMoeQuantInfo
+ 
++        w13_zp = getattr(layer, "w13_weight_zero_point", None)
++        w2_zp = getattr(layer, "w2_weight_zero_point", None)
++
+         return TritonMoeQuantInfo(
+             w13_weight=layer.w13_weight_packed,
+             w2_weight=layer.w2_weight_packed,
+             use_int4_w4a16=True,
+             w13_scale=layer.w13_weight_scale,
+             w2_scale=layer.w2_weight_scale,
++            w13_zp=w13_zp,
++            w2_zp=w2_zp,
+             block_shape=[0, self.group_size],
+         )
+ 
+@@ -556,13 +611,97 @@
+         layer: torch.nn.Module,
+         dispatch_output: StandardDispatchOutput,
+     ) -> CombineInput:
+-        assert (
+-            self.moe_runner_config.activation == "silu"
+-        ), "Only SiLU activation is supported."
+-
++        """Dynamic dequant: pass INT4 packed weights to Triton fused kernel."""
++        if get_bool_env_var("SGLANG_MOE_TORCH_FALLBACK"):
++            return self._apply_weights_torch_fallback(layer, dispatch_output)
+         quant_info = self.get_triton_quant_info(layer)
+         return self.runner.run(dispatch_output, quant_info)
+ 
++    def _apply_weights_torch_fallback(self, layer, dispatch_output):
++        """Pure PyTorch dequant fallback for debugging. Slow but correct."""
++        from sglang.srt.layers.moe.token_dispatcher import StandardCombineInput
++
++        x = dispatch_output.hidden_states  # [num_tokens, K]
++        topk_output = dispatch_output.topk_output
++        topk_weights, topk_ids, _ = topk_output
++        num_tokens, K = x.shape
++        top_k = topk_ids.shape[1]
++
++        # w13: [E, N_w13, K//2] uint8, scale: [E, N_w13, K_groups], zp: [E, N_w13//2, K_groups]
++        w13 = layer.w13_weight_packed  # uint8
++        s13 = layer.w13_weight_scale   # bf16
++        zp13 = getattr(layer, "w13_weight_zero_point", None)  # uint8
++        w2 = layer.w2_weight_packed
++        s2 = layer.w2_weight_scale
++        zp2 = getattr(layer, "w2_weight_zero_point", None)
++
++        E, N_w13, K_half = w13.shape
++        N_w2 = w2.shape[1]
++        group_size = self.group_size
++
++        # Dequant one expert's weight on the fly
++        def dequant_expert(w, s, zp, expert_id):
++            # w: [E, N, K//2] uint8 -> [N, K] float
++            we = w[expert_id]  # [N, K//2]
++            se = s[expert_id].float()  # [N, K_groups]
++            N_dim = we.shape[0]
++            # Unpack nibbles
++            lo = (we & 0x0F).to(torch.float32)  # even K
++            hi = ((we >> 4) & 0x0F).to(torch.float32)  # odd K
++            # Interleave: [N, K]
++            w_full = torch.stack([lo, hi], dim=-1).reshape(N_dim, -1)  # [N, K]
++            # ZP
++            if zp is not None:
++                zpe = zp[expert_id]  # [N//2, K_groups]
++                zp_lo = (zpe & 0x0F).to(torch.float32)  # even N
++                zp_hi = ((zpe >> 4) & 0x0F).to(torch.float32)  # odd N
++                zp_full = torch.stack([zp_lo, zp_hi], dim=1).reshape(N_dim, -1)  # [N, K_groups]... 
++                # Actually zp is [N//2, K_groups], need to expand to [N, K_groups]
++                zp_full2 = torch.zeros(N_dim, zpe.shape[1], device=zpe.device, dtype=torch.float32)
++                zp_full2[0::2, :] = zp_lo
++                zp_full2[1::2, :] = zp_hi
++                # Expand zp to [N, K]
++                zp_expanded = zp_full2.repeat_interleave(group_size, dim=1)  # [N, K]
++            else:
++                zp_expanded = torch.full_like(w_full, 8.0)
++            # Scale expand to [N, K]
++            s_expanded = se.repeat_interleave(group_size, dim=1)  # [N, K]
++            # Dequant
++            return ((w_full - zp_expanded) * s_expanded).to(x.dtype)
++
++        # Per-token per-expert matmul
++        N_w2 = w2.shape[1]  # hidden_size (output dim of down proj)
++        output = torch.zeros(num_tokens, N_w2, dtype=x.dtype, device=x.device)
++        
++        for k in range(top_k):
++            expert_ids_k = topk_ids[:, k]  # [num_tokens]
++            weights_k = topk_weights[:, k]  # [num_tokens]
++            
++            # Group tokens by expert
++            unique_experts = expert_ids_k.unique()
++            for eid in unique_experts:
++                mask = expert_ids_k == eid
++                x_expert = x[mask]  # [n, K]
++                
++                # w13 = gate + up fused: first N_w13//2 is gate, second is up
++                w13_dequant = dequant_expert(w13, s13, zp13, eid)  # [N_w13, K]
++                gate_up = x_expert @ w13_dequant.T  # [n, N_w13]
++                
++                # SiLU gate
++                N_half = N_w13 // 2
++                gate = gate_up[:, :N_half]
++                up = gate_up[:, N_half:]
++                hidden = torch.nn.functional.silu(gate) * up  # [n, N_half]
++                
++                # w2: down projection
++                w2_dequant = dequant_expert(w2, s2, zp2, eid)  # [N_w2, K_w2]
++                down = hidden @ w2_dequant.T  # [n, N_w2]
++                
++                # Weighted accumulate
++                output[mask] += down * weights_k[mask, None]
++        
++        return StandardCombineInput(hidden_states=output)
++
+ 
+ class NPUCompressedTensorsW4A16Int4DynamicMoE(CompressedTensorsMoEScheme):
+ 
+@@ -578,8 +717,7 @@
+         else:
+             self.group_size = 128
+ 
+-        self.w13_kernel = NPUWNA16Int4MoEMethod()
+-        self.w2_kernel = NPUWNA16Int4MoEMethod()
++        self.kernel = NPUW4A16Int4DynamicMoEMethod()
+ 
+     # TODO: See if we can merge this method's logic
+     # with CompressedTensorsWNA16MoE. Need more models and tests.
+@@ -681,51 +819,36 @@
+         layer.register_parameter("w2_weight_offset", w2_weight_offset)
+         set_weight_attrs(w2_weight_offset, extra_weight_attrs)
+ 
+-        w13_weight_shape = torch.nn.Parameter(
+-            torch.empty(num_experts, 2), requires_grad=False
+-        )
+-        layer.register_parameter("w13_weight_shape", w13_weight_shape)
+-        set_weight_attrs(w13_weight_shape, extra_weight_attrs)
+-
+-        w2_weight_shape = torch.nn.Parameter(
+-            torch.empty(num_experts, 2), requires_grad=False
+-        )
+-        layer.register_parameter("w2_weight_shape", w2_weight_shape)
+-        set_weight_attrs(w2_weight_shape, extra_weight_attrs)
+-
+     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+-        self.w13_kernel.process_weights_after_loading(layer, "w13")
+-        self.w2_kernel.process_weights_after_loading(layer, "w2")
++        self.kernel.process_weights_after_loading(layer)
+ 
+     def create_moe_runner(
+         self, layer: torch.nn.Module, moe_runner_config: MoeRunnerConfig
+     ):
+-        layer.w13_kernel = self.w13_kernel
+-        layer.w2_kernel = self.w2_kernel
+-        moe_runner_config.layer = layer
+         self.moe_runner_config = moe_runner_config
+-        backend = get_moe_runner_backend()
+-        if backend.is_auto():
+-            backend = MoeRunnerBackend.ASCEND
+-        self.runner = MoeRunner(backend, moe_runner_config)
+ 
+     def apply_weights(
+         self,
+         layer: torch.nn.Module,
+         dispatch_output: StandardDispatchOutput,
+     ) -> CombineInput:
+-        from sglang.srt.layers.moe.moe_runner.ascend import AscendQuantInfo
+ 
+-        quant_info = AscendQuantInfo(
+-            w13_weight=layer.w13_weight,
+-            w2_weight=layer.w2_weight,
+-            w13_weight_scale=layer.w13_weight_scale,
+-            w2_weight_scale=layer.w2_weight_scale,
+-            w13_weight_offset=layer.w13_weight_offset,
+-            w2_weight_offset=layer.w2_weight_offset,
+-            w13_weight_bias=getattr(layer, "w13_weight_bias", None),
+-            w2_weight_bias=getattr(layer, "w2_weight_bias", None),
+-            w13_scale_bias=getattr(layer, "w13_scale_bias", None),
+-            w2_scale_bias=getattr(layer, "w2_scale_bias", None),
++        return self.kernel.apply(layer, dispatch_output)
++
++    def apply_without_routing_weights(
++        self,
++        layer,
++        hidden_states,
++        hidden_states_scale,
++        group_list_type,
++        group_list,
++        output_dtype,
++    ):
++        return self.kernel.apply_without_routing_weights(
++            layer,
++            hidden_states,
++            hidden_states_scale,
++            group_list_type,
++            group_list,
++            output_dtype,
+         )
+-        return self.runner.run(dispatch_output, quant_info)
+
+--- a/sglang/srt/models/minimax_m3.py	2026-07-29 13:56:50.571891864 +0800
++++ b/sglang/srt/models/minimax_m3.py	2026-07-29 13:57:08.474774977 +0800
+@@ -29,12 +29,12 @@
+     get_minimax_sparse_layer_ids,
+ )
+ from sglang.srt.distributed import (
++    get_moe_expert_parallel_world_size,
+     get_pp_group,
++    get_tensor_model_parallel_world_size,
+     tensor_model_parallel_all_reduce,
+ )
+-from sglang.srt.environ import envs
+ from sglang.srt.eplb.expert_distribution import get_global_expert_distribution_recorder
+-from sglang.srt.eplb.expert_location_dispatch import ExpertLocationDispatchInfo
+ from sglang.srt.layers.activation import SiluAndMul
+ from sglang.srt.layers.communicator import (
+     LayerCommunicator,
+@@ -42,9 +42,14 @@
+     ScatterMode,
+     enable_moe_dense_fully_dp,
+ )
+-from sglang.srt.layers.dp_attention import is_dp_attention_enabled
++from sglang.srt.layers.dp_attention import (
++    get_attention_tp_rank,
++    get_attention_tp_size,
++    is_dp_attention_enabled,
++)
+ from sglang.srt.layers.layernorm import GemmaRMSNorm, RMSNorm
+ from sglang.srt.layers.linear import (
++    ColumnParallelLinear,
+     MergedColumnParallelLinear,
+     QKVParallelLinear,
+     ReplicatedLinear,
+@@ -64,59 +69,25 @@
+     ParallelLMHead,
+     VocabParallelEmbedding,
+ )
+-from sglang.srt.model_executor.cuda_graph_config import (
+-    Backend,
+-    Phase,
+-    check_cuda_graph_backend,
+-)
+ from sglang.srt.model_executor.forward_batch_info import ForwardBatch, PPProxyTensors
+-from sglang.srt.model_executor.forward_context import (
+-    get_forward_context,
+-    has_forward_context,
+-)
+ from sglang.srt.model_loader.weight_utils import (
+     default_weight_loader,
+     maybe_remap_kv_scale_name,
+ )
+ from sglang.srt.models.minimax_m2 import MiniMaxM2RMSNormTP
+-from sglang.srt.runtime_context import get_parallel, get_server_args
++from sglang.srt.server_args import get_global_server_args
+ from sglang.srt.utils import (
+     add_prefix,
+     get_device_sm,
+     is_cuda,
+-    is_hip,
+     log_info_on_rank0,
+     make_layers,
+ )
+ from sglang.srt.utils.hf_transformers_utils import get_rope_config
+ 
+ _is_cuda = is_cuda()
+-_is_hip = is_hip()
+ _device_sm = get_device_sm()
+ 
+-_FP8_KV_DTYPES = (
+-    torch.float8_e4m3fn,
+-    torch.float8_e5m2,
+-    torch.float8_e4m3fnuz,
+-)
+-
+-# rotary_dim required by the fused qknorm+rope JIT kernel: rotary_dim/2 must
+-# equal the CUDA warp size (32) so each warp norms+ropes one head in one pass.
+-_M3_FUSED_QKNORM_ROPE_ROTARY_DIM = 64
+-
+-_has_rocm_qk_norm_rope = False
+-if _is_hip:
+-    try:
+-        from sglang.kernels.ops.attention.minimax_m3_qk_norm_rope import (
+-            qk_gemma_rmsnorm_rope,
+-            sparse_qk_index_gemma_rmsnorm_rope,
+-            sparse_qk_index_gemma_rmsnorm_rope_cache,
+-        )
+-
+-        _has_rocm_qk_norm_rope = True
+-    except ImportError:
+-        _has_rocm_qk_norm_rope = False
+-
+ logger = logging.getLogger(__name__)
+ 
+ 
+@@ -129,8 +100,8 @@
+         apply_layernorm_1p: bool = False,
+     ) -> None:
+         super().__init__()
+-        self.tp_world = get_parallel().attn_tp_size
+-        self.tp_rank = get_parallel().attn_tp_rank
++        self.tp_world = get_attention_tp_size()
++        self.tp_rank = get_attention_tp_rank()
+         self.num_heads = num_heads
+         self.num_heads_per_tp = num_heads // self.tp_world
+         self.head_dim = head_dim
+@@ -146,8 +117,8 @@
+         param: nn.Parameter,
+         loaded_weight: torch.Tensor,
+     ) -> None:
+-        tp_world = get_parallel().attn_tp_size
+-        tp_rank = get_parallel().attn_tp_rank
++        tp_world = get_attention_tp_size()
++        tp_rank = get_attention_tp_rank()
+ 
+         shard_size = loaded_weight.shape[0] // tp_world
+         shard = slice(tp_rank * shard_size, (tp_rank + 1) * shard_size)
+@@ -169,49 +140,11 @@
+         return x.to(orig_dtype)
+ 
+ 
+-class _FusedQKVIndexProj(nn.Module):
+-    def __init__(
+-        self,
+-        quant_method,
+-        weight: torch.Tensor,
+-        weight_scale_inv: Optional[torch.Tensor],
+-        input_size_per_partition: int,
+-        logical_widths: List[int],
+-        orig_dtype: torch.dtype,
+-    ) -> None:
+-        super().__init__()
+-        # Named ``_qm`` (not ``quant_method``) so the loader's post-process loop
+-        # skips this module; the backend scale layout is derived once below.
+-        self._qm = quant_method
+-        self.register_parameter("weight", nn.Parameter(weight, requires_grad=False))
+-        self.input_size_per_partition = input_size_per_partition
+-        self.output_size_per_partition = weight.shape[0]
+-        self.logical_widths = logical_widths
+-        self.orig_dtype = orig_dtype
+-        self.input_scale = None
+-        if weight_scale_inv is not None:
+-            self.register_parameter(
+-                "weight_scale_inv", nn.Parameter(weight_scale_inv, requires_grad=False)
+-            )
+-            self.weight_scale_inv.format_ue8m0 = True
+-            # Must derive the backend scale layout here: the loader skips this
+-            # module (see ``_qm``), so it won't run process_weights_after_loading.
+-            quant_method._process_mxfp8_linear_weight_scale(self)
+-
+-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+-        return self._qm.apply(self, x, None)
+-
+-
+-def build_minimax_fused_qkv_index(model: nn.Module) -> None:
+-    for module in model.modules():
+-        if isinstance(module, MiniMaxM3Attention):
+-            module.maybe_build_fused_qkv_index()
+-
+-
+ class MiniMaxM3MLP(nn.Module):
+     def __init__(
+         self,
+         config: PretrainedConfig,
++        layer_id: int,
+         quant_config: Optional[QuantizationConfig] = None,
+         prefix: str = "",
+         reduce_results: bool = True,
+@@ -260,6 +193,7 @@
+     def forward(
+         self,
+         x,
++        forward_batch=None,
+         should_allreduce_fusion: bool = False,
+         use_reduce_scatter: bool = False,
+     ):
+@@ -283,11 +217,11 @@
+         prefix: str = "",
+     ):
+         super().__init__()
+-        self.tp_size = get_parallel().tp_size
++        self.tp_size = get_tensor_model_parallel_world_size()
+         self.n_shared_experts = getattr(config, "n_shared_experts", None)
+         self.num_fused_shared_experts = (
+             0
+-            if get_server_args().disable_shared_experts_fusion
++            if get_global_server_args().disable_shared_experts_fusion
+             else config.n_shared_experts
+         )
+ 
+@@ -311,7 +245,7 @@
+         self.experts = get_moe_impl_class(quant_config)(
+             num_experts=config.num_local_experts
+             + self.num_fused_shared_experts
+-            + get_server_args().ep_num_redundant_experts,
++            + get_global_server_args().ep_num_redundant_experts,
+             num_fused_shared_experts=self.num_fused_shared_experts,
+             top_k=config.num_experts_per_tok + self.num_fused_shared_experts,
+             hidden_size=config.hidden_size,
+@@ -323,8 +257,9 @@
+             gemm1_alpha=config.swiglu_alpha,
+             gemm1_clamp_limit=config.swiglu_limit,
+             prefix=add_prefix("experts", prefix),
+-            gate_up_interleaved=False,
++            interleaved=False,
+         )
++        # use sigmoid_topk, instead of grouped_topk
+         self.topk = TopK(
+             top_k=config.num_experts_per_tok + self.num_fused_shared_experts,
+             renormalize=True,
+@@ -338,26 +273,22 @@
+ 
+         if self.n_shared_experts is not None and self.num_fused_shared_experts == 0:
+             intermediate_size = config.intermediate_size * self.n_shared_experts
+-            # DeepEP all-gathers (not all-reduces) the layer output, so a TP-sharded
+-            # shared MLP would leave an unreduced partial; replicate (tp_size=1), like GLM4 / DSV2.
+-            shared_experts_tp1 = get_moe_a2a_backend().is_deepep()
+             self.shared_experts = MiniMaxM3MLP(
+                 config=config,
+-                quant_config=quant_config,
++                layer_id=layer_id,
++                quant_config=None,
+                 prefix=add_prefix("shared_experts", prefix),
+                 reduce_results=False,
+                 intermediate_size=intermediate_size,
+-                **(dict(tp_rank=0, tp_size=1) if shared_experts_tp1 else {}),
+             )
+         else:
+             self.shared_experts = None
+ 
+-        self.bf16_router_gemm = envs.SGLANG_OPT_USE_BF16_ROUTER_GEMM.get()
+         self.gate = ReplicatedLinear(
+             config.hidden_size,
+             config.num_local_experts,
+             bias=False,
+-            params_dtype=torch.bfloat16 if self.bf16_router_gemm else torch.float32,
++            params_dtype=torch.float32,
+             quant_config=None,
+             prefix=add_prefix("gate", prefix),
+         )
+@@ -365,7 +296,7 @@
+         self.layer_id = layer_id
+ 
+         if get_moe_a2a_backend().is_deepep():
+-            self.ep_size = get_parallel().moe_ep_size
++            self.ep_size = get_moe_expert_parallel_world_size()
+             self.top_k = config.num_experts_per_tok
+ 
+     @staticmethod
+@@ -395,7 +326,7 @@
+     ) -> torch.Tensor:
+         if hidden_states.shape[0] > 0:
+             shared_output = self._forward_shared_experts(hidden_states)
+-            router_logits = self._compute_router_logits(hidden_states)
++            router_logits, _ = self.gate(hidden_states.to(torch.float32))
+             topk_output = self.topk(hidden_states, router_logits)
+         else:
+             shared_output = None
+@@ -413,37 +344,7 @@
+     def forward_deepep(
+         self, hidden_states: torch.Tensor, forward_batch: ForwardBatch
+     ) -> torch.Tensor:
+-        shared_output = None
+-        if hidden_states.shape[0] > 0:
+-            shared_output = self._forward_shared_experts(hidden_states)
+-            router_logits = self._compute_router_logits(hidden_states)
+-            topk_output = self.topk(
+-                hidden_states,
+-                router_logits,
+-                num_token_non_padded=forward_batch.num_token_non_padded,
+-                expert_location_dispatch_info=ExpertLocationDispatchInfo.init_new(
+-                    layer_id=self.layer_id,
+-                ),
+-            )
+-        else:
+-            topk_output = self.topk.empty_topk_output(hidden_states.device)
+-
+-        # DeepEP returns the complete per-token routed result (no TP all-reduce here);
+-        # shared experts are replicated (tp_size=1), so both add directly.
+-        final_hidden_states = self.experts(hidden_states, topk_output)
+-
+-        if shared_output is not None:
+-            final_hidden_states = final_hidden_states + shared_output
+-
+-        return final_hidden_states
+-
+-    def _compute_router_logits(self, hidden_states: torch.Tensor) -> torch.Tensor:
+-        if self.bf16_router_gemm:
+-            return torch.mm(
+-                hidden_states, self.gate.weight.t(), out_dtype=torch.float32
+-            )
+-        router_logits, _ = self.gate(hidden_states.to(torch.float32))
+-        return router_logits
++        raise NotImplementedError("DeepEP is not yet implemented in MiniMax M3.")
+ 
+     def _forward_shared_experts(self, hidden_states: torch.Tensor):
+         if (hidden_states.shape[0] > 0) and (self.num_fused_shared_experts == 0):
+@@ -453,6 +354,18 @@
+ 
+ 
+ class MiniMaxM3Attention(nn.Module):
++    """MiniMax Attention implementation with QK normalization and partial RoPE.
++
++    Supports two modes selected by ``is_sparse_attention_layer``:
++
++    * Dense (default): standard QKV attention.
++    * Sparse: extra "index" branch (``index_q/k/v_proj`` + ``index_o_proj``)
++      whose outputs flow through the MiniMax sparse attention backend and
++      are summed into the dense output. Sparse layers must run under
++      ``MiniMaxHybridAttnBackend``, which dispatches per-layer based on
++      ``get_minimax_sparse_layer_ids``.
++    """
++
+     def __init__(
+         self,
+         config: PretrainedConfig,
+@@ -467,11 +380,12 @@
+         self.is_sparse_attention_layer = is_sparse_attention_layer
+         self.disable_index_value = is_sparse_attention_layer and disable_index_value
+ 
+-        attn_tp_rank = get_parallel().attn_tp_rank
+-        attn_tp_size = get_parallel().attn_tp_size
++        attn_tp_rank = get_attention_tp_rank()
++        attn_tp_size = get_attention_tp_size()
+         self.attn_tp_size = attn_tp_size
+         self.attn_tp_rank = attn_tp_rank
+ 
++        # Get dimensions from config
+         self.total_num_heads = config.num_attention_heads
+         assert self.total_num_heads % attn_tp_size == 0
+         self.num_heads = self.total_num_heads // attn_tp_size
+@@ -487,6 +401,7 @@
+             assert attn_tp_size % self.total_num_kv_heads == 0
+         self.num_kv_heads = max(1, self.total_num_kv_heads // attn_tp_size)
+ 
++        # Use head_dim from config if available, otherwise calculate
+         self.head_dim = getattr(
+             config, "head_dim", self.hidden_size // self.total_num_heads
+         )
+@@ -494,23 +409,39 @@
+         self.kv_size = self.num_kv_heads * self.head_dim
+         self.scaling = self.head_dim**-0.5
+ 
++        # RoPE settings - support partial RoPE
+         self.rope_theta, self.rope_scaling = get_rope_config(config)
+         self.max_position_embeddings = getattr(config, "max_position_embeddings", 8192)
+-        self.rotary_dim = getattr(config, "rotary_dim", self.head_dim)
++        self.rotary_dim = getattr(
++            config, "rotary_dim", self.head_dim
++        )  # MiniMax uses rotary_dim=64
+ 
++        # QK Normalization settings
++        self.use_qk_norm = getattr(config, "use_qk_norm", False)
+         self.qk_norm_type = getattr(config, "qk_norm_type", "per_layer")
+         self.use_gemma_norm = getattr(config, "use_gemma_norm", False)
++        self.attention_output_gate = getattr(config, "attention_output_gate", False)
+ 
++        # Sparse-attention-specific config (read from sparse_attention_config).
++        # Only the index-branch dimensions are needed at module level; all
++        # block/topk/local/init knobs live in the sparse attention backend.
+         if self.is_sparse_attention_layer:
+             assert self.qk_norm_type == "per_head", (
+                 f"sparse attention only supports qk_norm_type='per_head', "
+                 f"got {self.qk_norm_type!r}"
+             )
++            assert (
++                not self.attention_output_gate
++            ), "sparse attention does not support attention_output_gate"
+             sparse_cfg = config.sparse_attention_config
+             self.total_idx_heads = sparse_cfg["sparse_num_index_heads"]
+             self.idx_head_dim = sparse_cfg["sparse_index_dim"]
+-            # idx_replica_size ranks share one idx head; pre-divide idx_o on the activation
+-            # (not the weight) so the TP all-reduce sums right and stays FP8-quant-safe.
++            # Index heads use a GQA-style sharding (mirrors KV head replication
++            # for num_kv_heads < tp_size). When tp_size > total_idx_heads, each
++            # rank holds one head and `idx_replica_size` ranks share the same
++            # head; idx_o is divided by idx_replica_size in forward_core so the
++            # layer-level all-reduce sums to the correct value (done on the
++            # activation rather than the weight to remain quantization-safe).
+             if self.total_idx_heads >= attn_tp_size:
+                 assert self.total_idx_heads % attn_tp_size == 0
+             else:
+@@ -523,7 +454,7 @@
+         self.qkv_proj = QKVParallelLinear(
+             self.hidden_size,
+             self.head_dim,
+-            self.total_num_heads,
++            self.total_num_heads * (1 + self.attention_output_gate),
+             self.total_num_kv_heads,
+             bias=False,
+             quant_config=quant_config,
+@@ -543,31 +474,55 @@
+             prefix=add_prefix("o_proj", prefix),
+         )
+ 
++        # Setup RoPE with partial rotary dimension
+         self.rotary_emb = get_rope(
+             self.head_dim,
+-            rotary_dim=self.rotary_dim,
++            rotary_dim=self.rotary_dim,  # Use partial rotary dimension
+             max_position=self.max_position_embeddings,
+             base=self.rope_theta,
+             rope_scaling=self.rope_scaling,
+         )
+ 
++        # Index branch (sparse-only): an additional QKV+O projection that
++        # feeds the sparse attention backend's index path. Constructed only
++        # when this layer is sparse so dense layers / dense models stay
++        # parameter-identical to the original implementation.
+         if self.is_sparse_attention_layer:
+-            self.index_qkv_proj = QKVParallelLinear(
++            # Always use Column/RowParallel for index_q_proj / index_o_proj
++            # along the idx-head TP group. When idx_replica_size > 1 (i.e.
++            # total_idx_heads < attn_tp_size), multiple ranks in a replica
++            # group load the same per-head weight slice (GQA-style); the
++            # double-count introduced by the layer-level all-reduce is
++            # compensated by dividing idx_o by idx_replica_size in
++            # forward_core (quantization-safe runtime scaling).
++            self.index_q_proj = ColumnParallelLinear(
+                 self.hidden_size,
+-                self.idx_head_dim,
+-                self.total_idx_heads,
+-                total_num_kv_heads=1,
++                self.total_idx_heads * self.idx_head_dim,
+                 bias=False,
+                 quant_config=quant_config,
+-                v_head_size=(0 if self.disable_index_value else self.idx_head_dim),
++                prefix=add_prefix("index_q_proj", prefix),
+                 tp_rank=self.idx_head_rank,
+                 tp_size=self.idx_head_tp_size,
+-                prefix=add_prefix("index_qkv_proj", prefix),
++            )
++            self.index_k_proj = ReplicatedLinear(
++                self.hidden_size,
++                self.idx_head_dim,
++                bias=False,
++                quant_config=quant_config,
++                prefix=add_prefix("index_k_proj", prefix),
+             )
+ 
+             if self.disable_index_value:
++                self.index_v_proj = None
+                 self.index_o_proj = None
+             else:
++                self.index_v_proj = ReplicatedLinear(
++                    self.hidden_size,
++                    self.idx_head_dim,
++                    bias=False,
++                    quant_config=quant_config,
++                    prefix=add_prefix("index_v_proj", prefix),
++                )
+                 self.index_o_proj = RowParallelLinear(
+                     self.total_idx_heads * self.idx_head_dim,
+                     self.hidden_size,
+@@ -581,6 +536,9 @@
+                 )
+             self.index_rotary_emb = self.rotary_emb
+ 
++        # QK Normalization layers
++        # Use RMSNormTP for proper tensor parallel support
++        # Use total dimensions (before TP sharding) for correct normalization
+         if self.qk_norm_type == "per_layer":
+             if attn_tp_size > 1:
+                 self.q_norm = MiniMaxM2RMSNormTP(
+@@ -644,96 +602,6 @@
+             prefix=add_prefix("attn", prefix),
+         )
+ 
+-        self._use_fused_qknorm_rope = (
+-            _is_cuda
+-            and self.qk_norm_type == "per_head"
+-            and self.use_gemma_norm
+-            and self.head_dim == 128
+-            and self.rotary_dim == _M3_FUSED_QKNORM_ROPE_ROTARY_DIM
+-            and getattr(self.rotary_emb, "is_neox_style", False)
+-        )
+-
+-        self._fuse_qkv_index_enabled = self.is_sparse_attention_layer and (
+-            _is_cuda or _is_hip
+-        )
+-        self._fused_qkv_index = None
+-        self._fused_main_size = self.q_size + 2 * self.kv_size
+-
+-        self._combined_qknorm_ok = (
+-            self.is_sparse_attention_layer
+-            and self._use_fused_qknorm_rope
+-            and self.idx_head_dim == 128
+-            and self.rotary_emb.cos_sin_cache.dtype == torch.float32
+-        )
+-        if self.is_sparse_attention_layer:
+-            off_iq = self.num_heads + 2 * self.num_kv_heads
+-            off_ik = off_iq + self.num_idx_heads
+-            self._qknorm_group_meta = (
+-                (0, self.num_heads),
+-                (self.num_heads, self.num_kv_heads),
+-                (off_iq, self.num_idx_heads),
+-                (off_ik, 1),
+-            )
+-
+-        self._can_use_rocm_qk_norm_rope_static = (
+-            _has_rocm_qk_norm_rope
+-            and self.qk_norm_type == "per_head"
+-            and self.use_gemma_norm
+-            and self.q_norm.variance_epsilon == self.k_norm.variance_epsilon
+-            and hasattr(self.rotary_emb, "cos_sin_cache")
+-            and self.rotary_emb.rotary_dim == self.rotary_dim
+-            and self.rotary_dim <= self.head_dim
+-        )
+-        self._can_use_rocm_index_qk_norm_rope_static = (
+-            self.is_sparse_attention_layer
+-            and _has_rocm_qk_norm_rope
+-            and self.use_gemma_norm
+-            and self.index_q_norm.variance_epsilon == self.index_k_norm.variance_epsilon
+-            and hasattr(self.index_rotary_emb, "cos_sin_cache")
+-            and self.index_rotary_emb.rotary_dim == self.rotary_dim
+-            and self.rotary_dim <= self.idx_head_dim
+-        )
+-        self._can_use_rocm_sparse_qk_index_norm_rope_static = (
+-            self.is_sparse_attention_layer
+-            and self._can_use_rocm_qk_norm_rope_static
+-            and self._can_use_rocm_index_qk_norm_rope_static
+-            and self.idx_head_dim == self.head_dim
+-            and self.index_q_norm.variance_epsilon == self.q_norm.variance_epsilon
+-            and self.index_k_norm.variance_epsilon == self.q_norm.variance_epsilon
+-            and self.index_rotary_emb is self.rotary_emb
+-        )
+-
+-    def _can_use_rocm_qk_norm_rope(
+-        self, positions: torch.Tensor, q: torch.Tensor, k: torch.Tensor
+-    ) -> bool:
+-        return (
+-            self._can_use_rocm_qk_norm_rope_static
+-            and positions.dim() == 1
+-            and q.dim() == 2
+-            and k.dim() == 2
+-            and q.dtype in (torch.bfloat16, torch.float16)
+-            and k.dtype == q.dtype
+-        )
+-
+-    def _qk_norm_rope(
+-        self, positions: torch.Tensor, q: torch.Tensor, k: torch.Tensor
+-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+-        if self._can_use_rocm_qk_norm_rope(positions, q, k):
+-            return qk_gemma_rmsnorm_rope(
+-                q,
+-                k,
+-                self.q_norm.weight.data,
+-                self.k_norm.weight.data,
+-                positions,
+-                self.rotary_emb.cos_sin_cache,
+-                self.q_norm.variance_epsilon,
+-                self.head_dim,
+-                self.rotary_dim,
+-                self.rotary_emb.is_neox_style,
+-            )
+-        q, k = self._qk_norm(q, k)
+-        return self.rotary_emb(positions, q, k)
+-
+     def _qk_norm(
+         self, q: torch.Tensor, k: torch.Tensor
+     ) -> Tuple[torch.Tensor, torch.Tensor]:
+@@ -759,35 +627,10 @@
+             raise ValueError(f"Invalid qk_norm_type: {self.qk_norm_type}")
+         return q, k
+ 
+-    def _index_qk_norm_rope(
+-        self, positions: torch.Tensor, idx_q: torch.Tensor, idx_k: torch.Tensor
+-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+-        if (
+-            self._can_use_rocm_index_qk_norm_rope_static
+-            and positions.dim() == 1
+-            and idx_q.dim() == 2
+-            and idx_k.dim() == 2
+-            and idx_q.dtype in (torch.bfloat16, torch.float16)
+-            and idx_k.dtype == idx_q.dtype
+-        ):
+-            return qk_gemma_rmsnorm_rope(
+-                idx_q,
+-                idx_k,
+-                self.index_q_norm.weight.data,
+-                self.index_k_norm.weight.data,
+-                positions,
+-                self.index_rotary_emb.cos_sin_cache,
+-                self.index_q_norm.variance_epsilon,
+-                self.idx_head_dim,
+-                self.rotary_dim,
+-                self.index_rotary_emb.is_neox_style,
+-            )
+-        idx_q, idx_k = self._index_qk_norm(idx_q, idx_k)
+-        return self.index_rotary_emb(positions, idx_q, idx_k)
+-
+     def _index_qk_norm(
+         self, idx_q: torch.Tensor, idx_k: torch.Tensor
+     ) -> Tuple[torch.Tensor, torch.Tensor]:
++        # sparse index branch only supports per_head norm; init asserts this.
+         idx_q_shape = idx_q.shape
+         idx_k_shape = idx_k.shape
+         idx_q = idx_q.reshape(-1, self.idx_head_dim)
+@@ -796,326 +639,84 @@
+         idx_k = self.index_k_norm(idx_k).reshape(idx_k_shape)
+         return idx_q, idx_k
+ 
+-    def _split_index_qkv(
+-        self, idx_qkv: torch.Tensor
+-    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+-        q_size = self.num_idx_heads * self.idx_head_dim
+-        if self.disable_index_value:
+-            idx_q, idx_k = idx_qkv.split([q_size, self.idx_head_dim], dim=-1)
+-            idx_v = None
+-        else:
+-            idx_q, idx_k, idx_v = idx_qkv.split(
+-                [q_size, self.idx_head_dim, self.idx_head_dim], dim=-1
+-            )
+-        return idx_q, idx_k, idx_v
+-
+-    def maybe_build_fused_qkv_index(self) -> None:
+-        if not self._fuse_qkv_index_enabled or self._fused_qkv_index is not None:
+-            return
+-        from sglang.srt.layers.quantization.unquant import UnquantizedLinearMethod
+-
+-        qp, ip = self.qkv_proj, self.index_qkv_proj
+-        qm = qp.quant_method
+-        if type(ip.quant_method) is not type(qm):
+-            return
+-
+-        # gfx942 converts MXFP8->block-fp8 in process_weights_after_loading; the
+-        # fused module skips that pass, so keep two separate (converted) GEMMs.
+-        if getattr(qm, "convert_mxfp8_to_block", False):
+-            return
+-
+-        is_unquant = isinstance(qm, UnquantizedLinearMethod)
+-        use_mxfp8 = getattr(qm, "use_mxfp8", False) and hasattr(qp, "weight_scale_inv")
+-        if not (is_unquant or use_mxfp8):
+-            return
+-
+-        weight = torch.cat([qp.weight.data, ip.weight.data], dim=0).contiguous()
+-        if is_unquant:
+-            scale = None
+-        else:
+-            scale = torch.cat(
+-                [qp.weight_scale_inv.data, ip.weight_scale_inv.data], dim=0
+-            ).contiguous()
+-
+-        holder = _FusedQKVIndexProj(
+-            qm,
+-            weight,
+-            scale,
+-            getattr(qp, "input_size_per_partition", qp.input_size),
+-            [qp.output_size_per_partition, ip.output_size_per_partition],
+-            getattr(qp, "orig_dtype", qp.params_dtype),
+-        )
+-        self.add_module("fused_qkv_index_proj", holder)
+-        self._fused_qkv_index = holder
+-
+-        # Free the dead originals and drop their quant_method so the loader's
+-        # post-process loop ignores them (see ``_qm``).
+-        for m in (qp, ip):
+-            m.quant_method = None
+-            for attr in ("weight", "weight_scale_inv"):
+-                p = getattr(m, attr, None)
+-                if isinstance(p, nn.Parameter):
+-                    p.data = torch.empty(0, dtype=p.dtype, device=p.data.device)
+-
+-    def _qknorm_groups(self):
+-        weights = (
+-            self.q_norm.weight,
+-            self.k_norm.weight,
+-            self.index_q_norm.weight,
+-            self.index_k_norm.weight,
+-        )
+-        return [
+-            (w, off, cnt) for w, (off, cnt) in zip(weights, self._qknorm_group_meta)
+-        ]
+-
+-    def _can_use_rocm_sparse_qk_index_norm_rope(
+-        self,
+-        positions: torch.Tensor,
+-        q: torch.Tensor,
+-        k: torch.Tensor,
+-        idx_q: torch.Tensor,
+-        idx_k: torch.Tensor,
+-    ) -> bool:
+-        return (
+-            self._can_use_rocm_sparse_qk_index_norm_rope_static
+-            and positions.dim() == 1
+-            and q.dim() == 2
+-            and k.dim() == 2
+-            and idx_q.dim() == 2
+-            and idx_k.dim() == 2
+-            and q.dtype in (torch.bfloat16, torch.float16)
+-            and k.dtype == q.dtype
+-            and idx_q.dtype == q.dtype
+-            and idx_k.dtype == q.dtype
+-        )
+-
+-    def _sparse_qk_index_norm_rope(
+-        self,
+-        positions: torch.Tensor,
+-        q: torch.Tensor,
+-        k: torch.Tensor,
+-        idx_q: torch.Tensor,
+-        idx_k: torch.Tensor,
+-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+-        if self._can_use_rocm_sparse_qk_index_norm_rope(positions, q, k, idx_q, idx_k):
+-            return sparse_qk_index_gemma_rmsnorm_rope(
+-                q,
+-                k,
+-                idx_q,
+-                idx_k,
+-                self.q_norm.weight.data,
+-                self.k_norm.weight.data,
+-                self.index_q_norm.weight.data,
+-                self.index_k_norm.weight.data,
+-                positions,
+-                self.rotary_emb.cos_sin_cache,
+-                self.q_norm.variance_epsilon,
+-                self.head_dim,
+-                self.rotary_dim,
+-                self.rotary_emb.is_neox_style,
+-            )
+-        q, k = self._qk_norm_rope(positions, q, k)
+-        idx_q, idx_k = self._index_qk_norm_rope(positions, idx_q, idx_k)
+-        return q, k, idx_q, idx_k
+-
+-    @staticmethod
+-    def _mark_sparse_kv_cached_by_fusion(
+-        forward_batch: ForwardBatch, layer_id: int
+-    ) -> None:
+-        layer_ids = forward_batch.minimax_m3_precached_sparse_layers
+-        if layer_ids is None:
+-            layer_ids = set()
+-            forward_batch.minimax_m3_precached_sparse_layers = layer_ids
+-        layer_ids.add(layer_id)
+-
+-    @staticmethod
+-    def _get_sparse_kv_pool():
+-        if not has_forward_context():
+-            return None
+-        attn_backend = get_forward_context().attn_backend
+-        sparse_backend = getattr(attn_backend, "sparse", None)
+-        return getattr(sparse_backend, "kv_pool", None)
+-
+-    def _sparse_qk_index_norm_rope_cache(
+-        self,
+-        positions: torch.Tensor,
+-        q: torch.Tensor,
+-        k: torch.Tensor,
+-        v: torch.Tensor,
+-        idx_q: torch.Tensor,
+-        idx_k: torch.Tensor,
+-        idx_v: Optional[torch.Tensor],
+-        forward_batch: ForwardBatch,
+-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+-        kv_pool = self._get_sparse_kv_pool()
+-        # The fused kernel writes normed bf16 K/V straight into the paged cache, so an
+-        # fp8 main K/V cache (--kv-cache-dtype fp8_*) can't use it; fall back to norm+rope.
+-        main_kv_is_fp8 = kv_pool is not None and kv_pool.dtype in _FP8_KV_DTYPES
+-        can_use_cache_fusion = (
+-            not main_kv_is_fp8
+-            and idx_v is None
+-            and self._can_use_rocm_sparse_qk_index_norm_rope(
+-                positions, q, k, idx_q, idx_k
+-            )
+-            and getattr(forward_batch, "out_cache_loc", None) is not None
+-            and v.dim() == 2
+-            and v.dtype == q.dtype
+-            and v.shape == k.shape
+-        )
+-        if can_use_cache_fusion and kv_pool is not None:
+-            layer_id = self.attn.layer_id
+-            k_cache, v_cache = kv_pool.get_kv_buffer(layer_id)
+-            idx_k_cache = kv_pool.get_index_k_buffer(layer_id)
+-            q, k, idx_q, idx_k = sparse_qk_index_gemma_rmsnorm_rope_cache(
+-                q,
+-                k,
+-                v,
+-                idx_q,
+-                idx_k,
+-                k_cache,
+-                v_cache,
+-                idx_k_cache,
+-                forward_batch.out_cache_loc,
+-                self.q_norm.weight.data,
+-                self.k_norm.weight.data,
+-                self.index_q_norm.weight.data,
+-                self.index_k_norm.weight.data,
+-                positions,
+-                self.rotary_emb.cos_sin_cache,
+-                self.q_norm.variance_epsilon,
+-                self.head_dim,
+-                self.rotary_dim,
+-                self.rotary_emb.is_neox_style,
+-            )
+-            self._mark_sparse_kv_cached_by_fusion(forward_batch, layer_id)
+-            return q, k, idx_q, idx_k
+-        return self._sparse_qk_index_norm_rope(positions, q, k, idx_q, idx_k)
+-
+     def forward_prepare(
+         self,
+         positions: torch.Tensor,
+         hidden_states: torch.Tensor,
+         forward_batch: ForwardBatch,
+     ):
+-        fused_out = None
+-        if self._fused_qkv_index is not None:
+-            fused_out = self.fused_qkv_index_proj(hidden_states)
+-            qkv = fused_out[:, : self._fused_main_size]
+-
+-            if self._combined_qknorm_ok:
+-                from sglang.kernels.ops.attention.minimax_qknorm_rope import (
+-                    minimax_qknorm_rope_grouped,
+-                )
++        qkv, _ = self.qkv_proj(hidden_states)
+ 
+-                minimax_qknorm_rope_grouped(
+-                    fused_out,
+-                    self._qknorm_groups(),
+-                    self.rotary_emb.cos_sin_cache,
+-                    positions,
+-                    self.q_norm.variance_epsilon,
+-                )
+-                q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+-                idx_qkv = fused_out[:, self._fused_main_size :]
+-                idx_q, idx_k, idx_v = self._split_index_qkv(idx_qkv)
+-                inner_state = (q, k, v, idx_q, idx_k, idx_v, forward_batch)
+-                return None, forward_batch, inner_state
+-        else:
+-            qkv, _ = self.qkv_proj(hidden_states)
+-
+-        if self._use_fused_qknorm_rope:
+-            from sglang.kernels.ops.attention.minimax_qknorm_rope import (
+-                minimax_qknorm_rope,
+-            )
+-
+-            minimax_qknorm_rope(
+-                qkv,
+-                self.q_norm.weight,
+-                self.k_norm.weight,
+-                self.rotary_emb.cos_sin_cache,
+-                positions,
+-                self.num_heads,
+-                self.num_kv_heads,
+-                self.num_kv_heads,
+-                self.q_norm.variance_epsilon,
+-            )
+-            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+-            main_qk_already_normed = True
++        if self.attention_output_gate:
++            q_gate, k, v = qkv.split(
++                [self.q_size * 2, self.kv_size, self.kv_size], dim=-1
++            )
++            orig_shape = q_gate.shape[:-1]
++            q_gate = q_gate.view(
++                *orig_shape, -1, self.num_heads_per_group, self.head_dim
++            )
++            q = q_gate[..., ::2, :, :]
++            gate = q_gate[..., 1::2, :, :]
++            q = q.reshape(*orig_shape, -1)
++            gate = gate.reshape(*orig_shape, -1)
+         else:
+             q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+-            main_qk_already_normed = False
+-
+-        if self.is_sparse_attention_layer:
+-            if fused_out is not None:
+-                idx_qkv = fused_out[:, self._fused_main_size :]
+-            else:
+-                idx_qkv, _ = self.index_qkv_proj(hidden_states)
++            gate = None
+ 
+-            if main_qk_already_normed:
+-                use_fused_index_norm_rope = (
+-                    self._use_fused_qknorm_rope
+-                    and self.idx_head_dim == 128
+-                    and self.index_rotary_emb.cos_sin_cache.dtype == torch.float32
+-                )
+-                if use_fused_index_norm_rope:
+-                    from sglang.kernels.ops.attention.minimax_qknorm_rope import (
+-                        minimax_qknorm_rope,
+-                    )
++        q, k = self._qk_norm(q, k)
++        q, k = self.rotary_emb(positions, q, k)
+ 
+-                    minimax_qknorm_rope(
+-                        idx_qkv,
+-                        self.index_q_norm.weight,
+-                        self.index_k_norm.weight,
+-                        self.index_rotary_emb.cos_sin_cache,
+-                        positions,
+-                        self.num_idx_heads,
+-                        1,
+-                        0 if self.disable_index_value else 1,
+-                        self.index_q_norm.variance_epsilon,
+-                    )
+-                    idx_q, idx_k, idx_v = self._split_index_qkv(idx_qkv)
+-                else:
+-                    idx_q, idx_k, idx_v = self._split_index_qkv(idx_qkv)
+-                    idx_q, idx_k = self._index_qk_norm_rope(positions, idx_q, idx_k)
++        if self.is_sparse_attention_layer:
++            idx_q, _ = self.index_q_proj(hidden_states)
++            idx_k, _ = self.index_k_proj(hidden_states)
++            if self.disable_index_value:
++                idx_v = None
+             else:
+-                idx_q, idx_k, idx_v = self._split_index_qkv(idx_qkv)
+-                q, k, idx_q, idx_k = self._sparse_qk_index_norm_rope_cache(
+-                    positions, q, k, v, idx_q, idx_k, idx_v, forward_batch
+-                )
+-
+-            inner_state = (q, k, v, idx_q, idx_k, idx_v, forward_batch)
++                idx_v, _ = self.index_v_proj(hidden_states)
++            idx_q, idx_k = self._index_qk_norm(idx_q, idx_k)
++            idx_q, idx_k = self.index_rotary_emb(positions, idx_q, idx_k)
++            inner_state = (q, k, v, gate, idx_q, idx_k, idx_v, forward_batch)
+         else:
+-            if not main_qk_already_normed:
+-                q, k = self._qk_norm_rope(positions, q, k)
+-            inner_state = (q, k, v, forward_batch)
++            inner_state = (q, k, v, gate, forward_batch)
+         return None, forward_batch, inner_state
+ 
+     def forward_core(self, intermediate_state):
+         _, _, inner_state = intermediate_state
+ 
+         if self.is_sparse_attention_layer:
+-            q, k, v, idx_q, idx_k, idx_v, forward_batch = inner_state
++            q, k, v, gate, idx_q, idx_k, idx_v, forward_batch = inner_state
++            # The sparse attention backend expects 3D shapes; the dense
++            # backend accepts 2D q (it reshapes k/v internally). The shapes
++            # are equivalent flat-vs-grouped views, see RadixAttention.forward.
+             q = q.view(q.shape[0], self.num_heads, self.head_dim)
+             k = k.view(k.shape[0], self.num_kv_heads, self.head_dim)
+             v = v.view(v.shape[0], self.num_kv_heads, self.head_dim)
+-            idx_q = idx_q.reshape(idx_q.shape[0], self.num_idx_heads, self.idx_head_dim)
+-            idx_k = idx_k.reshape(idx_k.shape[0], 1, self.idx_head_dim)
++            idx_q = idx_q.view(idx_q.shape[0], self.num_idx_heads, self.idx_head_dim)
++            idx_k = idx_k.view(idx_k.shape[0], 1, self.idx_head_dim)
+             if idx_v is not None:
+-                idx_v = idx_v.reshape(idx_v.shape[0], 1, self.idx_head_dim)
++                idx_v = idx_v.view(idx_v.shape[0], 1, self.idx_head_dim)
+             idx_o, attn_output = self.attn(
+                 q, k, v, forward_batch, idx_q=idx_q, idx_k=idx_k, idx_v=idx_v
+             )
+             output, _ = self.o_proj(attn_output)
+             if self.disable_index_value:
+                 return output
+-            # idx_replica_size ranks produce identical idx_o; pre-divide idx_o (not the
+-            # o_proj weight) so the TP all-reduce sums right and stays FP8-quant-safe.
++            # When idx_replica_size > 1, `idx_replica_size` ranks share the
++            # same idx head and produce identical idx_o. After the layer-level
++            # all-reduce sums those duplicates, each head's contribution would
++            # be multiplied by idx_replica_size. Pre-dividing idx_o here keeps
++            # the post-reduce sum correct and is quantization-agnostic
++            # (unlike scaling the o_proj weight, which would re-quantize FP8).
+             if self.idx_replica_size > 1:
+                 idx_o = idx_o / self.idx_replica_size
+             idx_output, _ = self.index_o_proj(idx_o)
+             return output + idx_output
+ 
+-        q, k, v, forward_batch = inner_state
++        q, k, v, gate, forward_batch = inner_state
+         attn_output = self.attn(q, k, v, forward_batch)
++        if self.attention_output_gate:
++            gate = torch.sigmoid(gate.float())
++            attn_output = (attn_output * gate).to(attn_output.dtype)
+         output, _ = self.o_proj(attn_output)
+         return output
+ 
+@@ -1134,6 +735,19 @@
+ 
+ 
+ class MiniMaxM3DecoderLayer(nn.Module):
++    """MiniMax Decoder Layer implementation with MoE support.
++
++    The attention block can be either dense or sparse depending on
++    ``config.sparse_attention_config``:
++
++    * If ``sparse_attention_config`` is None (or absent), all layers run
++      dense attention -- behavior identical to the original M3 model.
++    * If present, the per-layer dense/sparse split is read from
++      ``sparse_attention_config['sparse_attention_freq']`` (the same
++      source consulted by ``MiniMaxHybridAttnBackend``), so the model and
++      the attention backend always agree on which layers are sparse.
++    """
++
+     def __init__(
+         self,
+         config: PretrainedConfig,
+@@ -1145,6 +759,23 @@
+         self.hidden_size = config.hidden_size
+         self.layer_id = layer_id
+ 
++        # Determine if this layer is MoE (sparse) or dense FIRST,
++        # since dense layers (0-2) have unquantized weights in checkpoint
++        moe_layer_freq = getattr(config, "moe_layer_freq", None)
++        mlp_layer_types = getattr(config, "mlp_layer_types", None)
++        if moe_layer_freq is not None:
++            self.is_layer_sparse = moe_layer_freq[layer_id] != 0
++        elif mlp_layer_types is not None:
++            self.is_layer_sparse = mlp_layer_types[layer_id] != "dense"
++        else:
++            self.is_layer_sparse = True
++
++        # Dense layers have unquantized weights in checkpoint
++        layer_quant_config = quant_config if self.is_layer_sparse else None
++
++        # Attention: dense layers use BF16, MoE layers use INT4 quantization
++        attn_quant_config = layer_quant_config
++
+         sparse_attention_config = getattr(config, "sparse_attention_config", None)
+         if sparse_attention_config is not None:
+             _, sparse_layer_ids = get_minimax_sparse_layer_ids(sparse_attention_config)
+@@ -1160,19 +791,12 @@
+         self.self_attn = MiniMaxM3Attention(
+             config=config,
+             layer_id=layer_id,
+-            quant_config=quant_config,
++            quant_config=attn_quant_config,
+             prefix=add_prefix("self_attn", prefix),
+             is_sparse_attention_layer=is_sparse_attention_layer,
+             disable_index_value=disable_index_value,
+         )
+ 
+-        moe_layer_freq = getattr(config, "moe_layer_freq", None)
+-        # Means "MLP is a sparse MoE", not attention sparsity. Kept as ``is_layer_sparse``
+-        # because LayerCommunicator / LayerScatterModes / other models read this attr.
+-        self.is_layer_sparse = (
+-            moe_layer_freq[layer_id] != 0 if moe_layer_freq is not None else True
+-        )
+-
+         if self.is_layer_sparse:
+             self.mlp = MiniMaxM3MoE(
+                 config=config,
+@@ -1187,7 +811,8 @@
+                 mlp_tp_rank, mlp_tp_size = None, None
+             self.mlp = MiniMaxM3MLP(
+                 config=config,
+-                quant_config=quant_config,
++                layer_id=layer_id,
++                quant_config=None,
+                 prefix=add_prefix("mlp", prefix),
+                 intermediate_size=config.dense_intermediate_size,
+                 tp_rank=mlp_tp_rank,
+@@ -1209,11 +834,15 @@
+             )
+ 
+         def _is_layer_sparse(lid):
+-            if moe_layer_freq is None:
+-                return True
+-            if lid < 0 or lid >= config.num_hidden_layers:
+-                return True
+-            return moe_layer_freq[lid] != 0
++            if moe_layer_freq is not None:
++                if lid < 0 or lid >= config.num_hidden_layers:
++                    return True
++                return moe_layer_freq[lid] != 0
++            if mlp_layer_types is not None:
++                if lid < 0 or lid >= config.num_hidden_layers:
++                    return True
++                return mlp_layer_types[lid] != "dense"
++            return True
+ 
+         is_previous_layer_sparse = _is_layer_sparse(layer_id - 1)
+         is_next_layer_sparse = _is_layer_sparse(layer_id + 1)
+@@ -1241,6 +870,7 @@
+         captured_last_layer_outputs: Optional[List[torch.Tensor]] = None,
+         **kwargs,
+     ) -> torch.Tensor:
++        # Self Attention
+         hidden_states, residual = (
+             self.layer_communicator.prepare_attn_and_capture_last_layer_outputs(
+                 hidden_states,
+@@ -1258,6 +888,7 @@
+                 forward_batch=forward_batch,
+             )
+ 
++        # Fully Connected (MLP or MoE)
+         hidden_states, residual = self.layer_communicator.prepare_mlp(
+             hidden_states, residual, forward_batch
+         )
+@@ -1267,10 +898,6 @@
+                 forward_batch
+             )
+         )
+-        if self.is_layer_sparse and get_parallel().tp_size > 1:
+-            # Sparse MoE outputs are TP-partial; deferring their all-reduce into the next
+-            # layer's fusion re-triggers the M3 no-EOS runaway. Force immediate all-reduce.
+-            should_allreduce_fusion = False
+ 
+         use_reduce_scatter = self.layer_communicator.should_use_reduce_scatter(
+             forward_batch
+@@ -1279,6 +906,7 @@
+         if self.is_layer_sparse or hidden_states.shape[0] != 0:
+             hidden_states = self.mlp(
+                 hidden_states,
++                forward_batch,
+                 should_allreduce_fusion,
+                 use_reduce_scatter,
+             )
+@@ -1344,6 +972,7 @@
+         else:
+             self.norm = PPMissingLayer(return_tuple=True)
+ 
++        # For EAGLE3 support
+         self.layers_to_capture = []
+ 
+     def get_input_embeddings(self) -> torch.Tensor:
+@@ -1382,10 +1011,9 @@
+             )
+         else:
+             for i in range(self.start_layer, self.end_layer):
+-                # NOTE: torch dynamo does not support graph break in context manager
+                 ctx = (
+                     nullcontext()
+-                    if check_cuda_graph_backend(Phase.PREFILL, Backend.TC_PIECEWISE)
++                    if not get_global_server_args().disable_piecewise_cuda_graph
+                     else get_global_expert_distribution_recorder().with_current_layer(i)
+                 )
+                 with ctx:
+@@ -1418,6 +1046,14 @@
+ 
+ 
+ class MiniMaxM3SparseForCausalLM(nn.Module):
++    """MiniMax M3 model for causal language modeling.
++
++    Always loaded as the mixed sparse/dense backbone: which layers are sparse
++    vs dense is decided by ``config.sparse_attention_config`` (see
++    ``MiniMaxM3DecoderLayer`` and ``MiniMaxHybridAttnBackend``). A checkpoint
++    that omits ``sparse_attention_config`` will produce a pure-dense model.
++    """
++
+     def __init__(
+         self,
+         config: PretrainedConfig,
+@@ -1443,20 +1079,21 @@
+                 config.hidden_size,
+                 quant_config=quant_config,
+                 prefix=add_prefix("lm_head", prefix),
+-                use_attn_tp_group=get_server_args().enable_dp_lm_head,
++                use_attn_tp_group=get_global_server_args().enable_dp_lm_head,
+             )
+ 
+             self.logits_processor = LogitsProcessor(config)
+         else:
+             self.lm_head = PPMissingLayer()
+ 
++        # For EAGLE3
+         self.capture_aux_hidden_states = False
+ 
+     def get_input_embeddings(self):
+         return self.model.get_input_embeddings()
+ 
+     def determine_num_fused_shared_experts(self):
+-        if get_server_args().disable_shared_experts_fusion:
++        if get_global_server_args().disable_shared_experts_fusion:
+             return
+ 
+         disable_reason = None
+@@ -1466,18 +1103,13 @@
+             disable_reason = "Shared experts fusion currently requires CUDA devices."
+         elif _is_cuda and (_device_sm is not None) and (_device_sm < 80):
+             disable_reason = "Shared experts fusion requires SM80 or newer GPUs."
+-        elif get_parallel().moe_ep_size > 1:
++        elif get_moe_expert_parallel_world_size() > 1:
+             disable_reason = "Shared experts fusion is not supported together with expert parallelism yet."
+         elif get_moe_a2a_backend().is_deepep():
+             disable_reason = "Shared experts fusion is not supported when Deepep MoE backend is enabled."
+ 
+         if disable_reason is not None:
+-            from sglang.srt.arg_groups.overrides import declare_load_time_override
+-
+-            declare_load_time_override(
+-                "MiniMaxM3ForCausalLM.determine_num_fused_shared_experts",
+-                {"disable_shared_experts_fusion": True},
+-            )
++            get_global_server_args().disable_shared_experts_fusion = True
+             log_info_on_rank0(
+                 logger,
+                 f"{disable_reason} Shared experts fusion optimization is disabled.",
+@@ -1487,7 +1119,7 @@
+         self.num_fused_shared_experts = self.config.n_shared_experts
+         assert (
+             self.num_fused_shared_experts == 1
+-        ), "Only 1 fused shared expert is supported for MiniMax-M3"
++        ), "Only 1 fused shared expert is supported for Glm4MoeForCausalLM"
+         log_info_on_rank0(logger, "Shared experts fusion optimization enabled.")
+ 
+     def set_eagle3_layers_to_capture(self, layer_ids: Optional[list[int]] = None):
+@@ -1501,7 +1133,7 @@
+                 2,
+                 num_layers // 2,
+                 num_layers - 3,
+-            ]
++            ]  # Specific layers for EAGLE3 support
+         else:
+             self.model.layers_to_capture = [val + 1 for val in layer_ids]
+ 
+@@ -1517,6 +1149,7 @@
+         input_embeds: torch.Tensor = None,
+         pp_proxy_tensors: Optional[PPProxyTensors] = None,
+     ) -> torch.Tensor:
++        # _print_tensor_info(input_ids, "input_ids")
+         hidden_states = self.model(
+             input_ids, positions, forward_batch, input_embeds, pp_proxy_tensors
+         )
+@@ -1544,8 +1177,10 @@
+         """Load model weights with proper mapping for MiniMax architecture."""
+ 
+         stacked_params_mapping = [
+-            # Leading "." on ".qkv_proj" prevents it from falsely matching the sparse
+-            # index_q/k/v_proj weights (remapped separately below).
++            # (param_name, shard_name, shard_id)
++            # Leading "." prevents falsely matching the sparse-attention
++            # ``index_q_proj`` / ``index_k_proj`` / ``index_v_proj`` weights,
++            # which contain ``q_proj`` / ``k_proj`` / ``v_proj`` as substrings.
+             (".qkv_proj", ".q_proj", "q"),
+             (".qkv_proj", ".k_proj", "k"),
+             (".qkv_proj", ".v_proj", "v"),
+@@ -1553,14 +1188,8 @@
+             (".gate_up_proj", ".up_proj", 1),
+         ]
+ 
+-        # Value-disabled layers have no ".index_v_proj" weight, so that entry never matches.
+-        if getattr(self.config, "sparse_attention_config", None) is not None:
+-            stacked_params_mapping += [
+-                (".index_qkv_proj", ".index_q_proj", "q"),
+-                (".index_qkv_proj", ".index_k_proj", "k"),
+-                (".index_qkv_proj", ".index_v_proj", "v"),
+-            ]
+-
++        # Params for weights, fp8 weight scales, fp8 activation scales
++        # (param_name, weight_name, expert_id, shard_id)
+         expert_params_mapping = FusedMoE.make_expert_params_mapping(
+             ckpt_gate_proj_name="w1",
+             ckpt_down_proj_name="w2",
+@@ -1577,9 +1206,9 @@
+             ):
+                 continue
+ 
+-            name = name.replace(".block_sparse_moe", ".mlp")
+-
+             if self.num_fused_shared_experts > 0 and "mlp.shared_experts" in name:
++                # Map shared expert weights to the last expert slot
++                # Shared expert becomes expert ID = n_routed_experts
+                 name = name.replace(
+                     "mlp.shared_experts",
+                     f"mlp.experts.{self.config.num_local_experts}",
+@@ -1593,16 +1222,22 @@
+ 
+             spec_layer = get_spec_layer_idx_from_weight_name(self.config, name)
+             if spec_layer is not None:
+-                continue
++                continue  # skip spec decode layers for main model
+ 
+             for param_name, weight_name, shard_id in stacked_params_mapping:
++                # Skip non-stacked layers and experts (experts handled below).
+                 if weight_name not in name:
+                     continue
+-                # Must skip experts before the name.replace below, else gate_proj ->
+-                # gate_up_proj -> gate_gate_up_proj double-remap breaks load.
++                # We have mlp.experts[0].gate_proj in the checkpoint.
++                # Since we handle the experts below in expert_params_mapping,
++                # we need to skip here BEFORE we update the name, otherwise
++                # name will be updated to mlp.experts[0].gate_up_proj, which
++                # will then be updated below in expert_params_mapping
++                # for mlp.experts[0].gate_gate_up_proj, which breaks load.
+                 if "mlp.experts." in name:
+                     continue
+                 name = name.replace(weight_name, param_name)
++                # Skip loading extra bias for GPTQ models.
+                 if name.endswith(".bias") and name not in params_dict:
+                     continue
+                 if name not in params_dict:
+@@ -1624,6 +1259,7 @@
+ 
+                     name = name.replace(weight_name, param_name)
+                     if name not in params_dict:
++                        # Expert weight not on this rank, will be skipped below
+                         continue
+ 
+                     param = params_dict[name]
+@@ -1638,11 +1274,14 @@
+                     break
+                 else:
+                     if is_expert_weight:
++                        # This is an expert weight but not mapped to this rank, skip all remaining processing
+                         continue
+ 
++                    # Skip loading extra bias for GPTQ models.
+                     if name.endswith(".bias") and name not in params_dict:
+                         continue
+ 
++                    # Remapping the name of FP8 kv-scale.
+                     name = maybe_remap_kv_scale_name(name, params_dict)
+                     if name is None:
+                         continue
+@@ -1660,10 +1299,6 @@
+                     else:
+                         logger.warning(f"Parameter {name} not found in params_dict")
+             loaded_params.add(name)
+-
+-        # Run before the loader's process pass: the raw fp8 weight + uint8 scale are
+-        # final here (mxfp8 post-process only derives the packed scale, not these).
+-        build_minimax_fused_qkv_index(self)
+         return loaded_params
+ 
+     @classmethod
+@@ -1680,8 +1315,10 @@
+ def get_spec_layer_idx_from_weight_name(
+     config: PretrainedConfig, weight_name: str
+ ) -> Optional[int]:
+-    # M3 checkpoints emit MTP weights as model.mtp.layers.{i}.*; skip them here
+-    # (no NextN module is built for the main model).
++    # M3 checkpoints emit MTP weights as ``model.mtp.layers.{i}.*``. Treat
++    # them as spec-layer so the weight loader skips them cleanly when no
++    # NextN module is built. Names not covered here fall through to the
++    # catch-all and stay visible as warnings.
+     if hasattr(config, "num_mtp_modules") and (config.num_mtp_modules > 0):
+         for i in range(config.num_mtp_modules):
+             if weight_name.startswith(f"model.mtp.layers.{i}."):
+
+--- a/sglang/srt/models/minimax_m3_vl.py	2026-07-29 13:56:50.571891864 +0800
++++ b/sglang/srt/models/minimax_m3_vl.py	2026-07-29 13:21:01.476886909 +0800
+@@ -1,4 +1,5 @@
+ # SPDX-License-Identifier: Apache-2.0
++# MiniMax M3 VL — vision tower + M3 (mixed sparse/dense MoE) text backbone.
+ 
+ import logging
+ from typing import Iterable, List, Optional, Tuple
+@@ -7,6 +8,7 @@
+ import torch.nn as nn
+ 
+ from sglang.srt.distributed import (
++    get_moe_expert_parallel_world_size,
+     get_pp_group,
+ )
+ from sglang.srt.layers.logits_processor import LogitsProcessor
+@@ -30,8 +32,6 @@
+ )
+ from sglang.srt.models.minimax_m3 import (
+     MiniMaxM3Model,
+-    MiniMaxM3SparseForCausalLM,
+-    build_minimax_fused_qkv_index,
+     get_spec_layer_idx_from_weight_name,
+ )
+ from sglang.srt.models.minimax_vl_common import (
+@@ -42,7 +42,7 @@
+     load_vision_weight,
+     merge_vit_qkv_weights,
+ )
+-from sglang.srt.runtime_context import get_parallel, get_server_args
++from sglang.srt.server_args import get_global_server_args
+ from sglang.srt.utils import add_prefix, get_device_sm, is_cuda, log_info_on_rank0
+ from sglang.srt.utils.hf_transformers_utils import get_rope_config
+ 
+@@ -54,6 +54,14 @@
+ 
+ 
+ class MiniMaxM3SparseForConditionalGeneration(nn.Module):
++    """MiniMax M3 VL: shared vision tower + M3 LLM with mixed sparse/dense attention.
++
++    Always loaded as the mixed sparse/dense backbone: which layers are sparse
++    vs dense is decided by ``config.text_config.sparse_attention_config``. A
++    checkpoint that omits ``sparse_attention_config`` will produce a pure-dense
++    model.
++    """
++
+     def __init__(
+         self,
+         config,
+@@ -65,7 +73,7 @@
+         self.quant_config = quant_config
+         self.pp_group = get_pp_group()
+ 
+-        self.use_data_parallel = get_server_args().mm_enable_dp_encoder
++        self.use_data_parallel = get_global_server_args().mm_enable_dp_encoder
+ 
+         self.num_fused_shared_experts = 0
+         self._determine_num_fused_shared_experts()
+@@ -91,12 +99,12 @@
+             projector_hidden_size=projector_hidden_size,
+             quant_config=None,
+             prefix=add_prefix("vision_tower", prefix),
+-            multimodal_projector_bias=getattr(
+-                config, "multimodal_projector_bias", True
+-            ),
+-            patch_merge_bias=getattr(config, "patch_merge_bias", True),
+         )
+ 
++        # Language model: M3 (with optional sparse attention).
++        # The unified MiniMaxM3Model reads ``text_config.sparse_attention_config``
++        # to decide per-layer whether to construct dense or sparse attention,
++        # so no branching is needed here.
+         text_config = config.text_config
+         self.model = MiniMaxM3Model(
+             config=text_config,
+@@ -110,7 +118,7 @@
+                 text_config.hidden_size,
+                 quant_config=quant_config,
+                 prefix=add_prefix("language_model.lm_head", prefix),
+-                use_attn_tp_group=get_server_args().enable_dp_lm_head,
++                use_attn_tp_group=get_global_server_args().enable_dp_lm_head,
+             )
+         else:
+             self.lm_head = PPMissingLayer()
+@@ -124,8 +132,7 @@
+ 
+     def _determine_num_fused_shared_experts(self) -> None:
+         text_config = self.config.text_config
+-        server_args = get_server_args()
+-        if server_args.disable_shared_experts_fusion:
++        if get_global_server_args().disable_shared_experts_fusion:
+             return
+ 
+         disable_reason = None
+@@ -133,9 +140,9 @@
+             disable_reason = "No shared experts are defined in the config."
+         elif not _is_cuda:
+             disable_reason = "Shared experts fusion currently requires CUDA devices."
+-        elif (_device_sm is not None) and (_device_sm < 80):
++        elif _is_cuda and (_device_sm is not None) and (_device_sm < 80):
+             disable_reason = "Shared experts fusion requires SM80 or newer GPUs."
+-        elif get_parallel().moe_ep_size > 1:
++        elif get_moe_expert_parallel_world_size() > 1:
+             disable_reason = (
+                 "Shared experts fusion is not supported together with expert "
+                 "parallelism yet."
+@@ -147,12 +154,7 @@
+             )
+ 
+         if disable_reason is not None:
+-            from sglang.srt.arg_groups.overrides import declare_load_time_override
+-
+-            declare_load_time_override(
+-                "MiniMaxM3VLForCausalLM._determine_num_fused_shared_experts",
+-                {"disable_shared_experts_fusion": True},
+-            )
++            get_global_server_args().disable_shared_experts_fusion = True
+             log_info_on_rank0(
+                 logger,
+                 f"{disable_reason} Shared experts fusion optimization is disabled.",
+@@ -165,15 +167,6 @@
+         ), "Only 1 fused shared expert is supported"
+         log_info_on_rank0(logger, "Shared experts fusion optimization enabled.")
+ 
+-    @classmethod
+-    def get_model_config_for_expert_location(cls, config):
+-        # EP asserts if this hook is absent on the top-level arch; VL nests the
+-        # LM config under text_config, so delegate there (fall back to config).
+-        text_config = getattr(config, "text_config", None) or config
+-        return MiniMaxM3SparseForCausalLM.get_model_config_for_expert_location(
+-            text_config
+-        )
+-
+     def pad_input_ids(self, input_ids: List[int], mm_inputs: MultimodalInputs):
+         return MultiModalityDataPaddingPatternMultimodalTokens().pad_input_tokens(
+             input_ids, mm_inputs
+@@ -226,6 +219,16 @@
+         return self.model.end_layer
+ 
+     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
++        """Load checkpoint weights for the vision tower and the M3 LLM.
++
++        M3 LLM differs from M2 in:
++        - MoE path is ``mlp.experts.*`` (not ``block_sparse_moe.experts.*``);
++          checkpoints saved with the M2 naming are remapped on the fly.
++        - Optional shared experts fusion: ``mlp.shared_experts`` is mapped onto
++          a synthetic ``mlp.experts.{num_local_experts}`` slot.
++        - PP layer skipping via ``get_layer_id``.
++        - MTP / spec-decode layers are skipped.
++        """
+         from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
+ 
+         # ``.qkv_proj`` (with the leading dot) prevents matching e.g.
+@@ -238,16 +241,6 @@
+             (".gate_up_proj", ".up_proj", 1),
+         ]
+ 
+-        if (
+-            getattr(self.config.text_config, "sparse_attention_config", None)
+-            is not None
+-        ):
+-            llm_stacked_params_mapping += [
+-                (".index_qkv_proj", ".index_q_proj", "q"),
+-                (".index_qkv_proj", ".index_k_proj", "k"),
+-                (".index_qkv_proj", ".index_v_proj", "v"),
+-            ]
+-
+         num_experts = getattr(self.config.text_config, "num_local_experts", 0)
+         expert_params_mapping = (
+             FusedMoE.make_expert_params_mapping(
+@@ -284,8 +277,6 @@
+ 
+         merge_vit_qkv_weights(vit_qkv_weights, vit_qkv_biases, params_dict)
+ 
+-        build_minimax_fused_qkv_index(self)
+-
+     def _load_llm_weight(
+         self,
+         name: str,
+@@ -294,9 +285,14 @@
+         llm_stacked_params_mapping: list,
+         expert_params_mapping: list,
+     ) -> None:
++        # Older checkpoints used the M2-style ``block_sparse_moe`` naming.
+         if "block_sparse_moe" in name:
+             name = name.replace("block_sparse_moe", "mlp")
+ 
++        # Checkpoint has "out_proj" for attention output, model uses "o_proj"
++        if "self_attn.out_proj." in name:
++            name = name.replace("self_attn.out_proj.", "self_attn.o_proj.")
++
+         layer_id = get_layer_id(name)
+         if layer_id is not None and (
+             layer_id < self.model.start_layer or layer_id >= self.model.end_layer
+@@ -322,12 +318,21 @@
+             if weight_name not in name:
+                 continue
+             if "mlp.experts." in name:
++                # Experts are handled by expert_params_mapping below.
+                 continue
+             new_name = name.replace(weight_name, param_name)
+             if new_name.endswith(".bias") and new_name not in params_dict:
+                 continue
+             if new_name not in params_dict:
+-                continue
++                # compressed-tensors uses weight_packed instead of weight
++                if new_name.endswith(".weight"):
++                    packed_name = new_name[:-len(".weight")] + ".weight_packed"
++                    if packed_name in params_dict:
++                        new_name = packed_name
++                    else:
++                        continue
++                else:
++                    continue
+             param = params_dict[new_name]
+             param.weight_loader(param, loaded_weight, shard_id)
+             return
+@@ -349,6 +354,14 @@
+                 shard_id=shard_id,
+                 expert_id=expert_id,
+             )
++            # Diagnostic: check zp param state after first load for layer 3
++            if "zero_point" in name and "layers.3." in name and "w13" in new_name and expert_id == 0 and shard_id == "w1":
++                import os
++                rank = os.environ.get("RANK", os.environ.get("LOCAL_RANK", "?"))
++                zp_data = param.data[0]  # expert 0
++                nz = (zp_data != 0).sum().item()
++                with open('/workspace/zp_load_diag.txt', 'a') as _f:
++                    _f.write(f"AFTER_LOAD rank={rank} name={name} param_nz={nz}/{zp_data.numel()} sample={zp_data[0,:4].tolist()} data_ptr={param.data.data_ptr()} param_id={id(param)}\n")
+             return
+         if is_expert_weight:
+             return
+@@ -359,8 +372,17 @@
+         if remapped is None:
+             return
+         if remapped not in params_dict:
+-            logger.warning(f"Parameter {remapped} not found in params_dict")
+-            return
++            # compressed-tensors uses weight_packed instead of weight
++            if remapped.endswith(".weight"):
++                packed_name = remapped[:-len(".weight")] + ".weight_packed"
++                if packed_name in params_dict:
++                    remapped = packed_name
++                else:
++                    logger.warning(f"Parameter {remapped} not found in params_dict")
++                    return
++            else:
++                logger.warning(f"Parameter {remapped} not found in params_dict")
++                return
+         param = params_dict[remapped]
+         weight_loader = getattr(param, "weight_loader", default_weight_loader)
+         try:
+
+--- a/sglang/srt/layers/moe/moe_runner/triton_utils/fused_moe.py	2026-07-29 13:56:50.509892269 +0800
++++ b/sglang/srt/layers/moe/moe_runner/triton_utils/fused_moe.py	2026-07-29 11:04:13.380429383 +0800
+@@ -13,22 +13,10 @@
+ import torch.nn.functional as F
+ import triton.language as tl
+ 
+-from sglang.kernels.ops.moe.fused_moe_triton_kernels import (
+-    act_and_mul_triton,
+-    invoke_fused_moe_kernel,
+-    moe_sum_reduce_triton,
+-    support_tensor_descriptor,
+-)
+-from sglang.srt.batch_invariant_ops import is_batch_invariant_mode_enabled
+-from sglang.srt.distributed import get_tp_group
+-from sglang.srt.distributed.device_communicators.pynccl_allocator import (
+-    use_symmetric_memory,
+-)
+ from sglang.srt.environ import envs
+-from sglang.srt.layers.dp_attention import is_allocation_symmetric
+ from sglang.srt.layers.moe.moe_runner import MoeRunnerConfig
+ from sglang.srt.layers.moe.utils import get_moe_padding_size
+-from sglang.srt.runtime_context import get_server_args
++from sglang.srt.server_args import get_global_server_args
+ from sglang.srt.utils import (
+     cpu_has_amx_support,
+     get_bool_env_var,
+@@ -42,7 +30,13 @@
+ from sglang.srt.utils.custom_op import register_custom_op
+ 
+ from .fused_moe_triton_config import get_config_dtype_str, try_get_optimal_moe_config
+-from .moe_align_block_size import moe_align_block_size
++from .fused_moe_triton_kernels import (
++    act_and_mul_triton,
++    invoke_fused_moe_kernel,
++    moe_sum_reduce_triton,
++    support_tensor_descriptor,
++)
++from .moe_align_block_size import moe_align_block_size, dcu_moe_align_block_size
+ 
+ if TYPE_CHECKING:
+     from sglang.srt.layers.moe.topk import StandardTopKOutput
+@@ -60,7 +54,7 @@
+ if _is_cuda:
+     from sgl_kernel import moe_sum_reduce
+ 
+-    from sglang.kernels.ops.activation.activation import gelu_and_mul, silu_and_mul
++    from sglang.jit_kernel.activation import gelu_and_mul, silu_and_mul
+ elif _is_cpu and _is_cpu_amx_available:
+     pass
+ elif _is_hip:
+@@ -94,10 +88,6 @@
+ padding_size = get_moe_padding_size(_use_aiter)
+ 
+ 
+-def _use_moe_sum_reduce_torch_compile(num_tokens: int) -> bool:
+-    return num_tokens <= 32 and not is_batch_invariant_mode_enabled()
+-
+-
+ @register_custom_op(mutates_args=["hidden_states"])
+ def inplace_fused_experts(
+     hidden_states: torch.Tensor,
+@@ -127,7 +117,7 @@
+     gemm1_limit: Optional[float] = None,
+     filter_expert: bool = True,
+     swiglu_limit: Optional[float] = None,
+-    gate_up_interleaved: bool = True,
++    interleaved: bool = True,
+ ) -> None:
+     fused_experts_impl(
+         hidden_states,
+@@ -159,7 +149,7 @@
+         gemm1_limit,
+         filter_expert,
+         swiglu_limit=swiglu_limit,
+-        gate_up_interleaved=gate_up_interleaved,
++        interleaved=interleaved,
+     )
+ 
+ 
+@@ -193,7 +183,7 @@
+     gemm1_limit: Optional[float] = None,
+     filter_expert: bool = True,
+     swiglu_limit: Optional[float] = None,
+-    gate_up_interleaved: bool = True,
++    interleaved: bool = True,
+ ) -> torch.Tensor:
+     return fused_experts_impl(
+         hidden_states,
+@@ -225,7 +215,7 @@
+         gemm1_limit=gemm1_limit,
+         filter_expert=filter_expert,
+         swiglu_limit=swiglu_limit,
+-        gate_up_interleaved=gate_up_interleaved,
++        interleaved=interleaved,
+     )
+ 
+ 
+@@ -285,7 +275,7 @@
+             moe_runner_config.gemm1_clamp_limit,
+             filter_expert,
+             swiglu_limit=moe_runner_config.swiglu_limit,
+-            gate_up_interleaved=moe_runner_config.gate_up_interleaved,
++            interleaved=moe_runner_config.interleaved,
+         )
+         return hidden_states
+     else:
+@@ -318,7 +308,7 @@
+             gemm1_limit=moe_runner_config.gemm1_clamp_limit,
+             filter_expert=filter_expert,
+             swiglu_limit=moe_runner_config.swiglu_limit,
+-            gate_up_interleaved=moe_runner_config.gate_up_interleaved,
++            interleaved=moe_runner_config.interleaved,
+         )
+ 
+ 
+@@ -408,7 +398,10 @@
+         and down_config.pop("USE_TMA", False)
+     )
+ 
+-    sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
++    # sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
++    #     topk_ids, config["BLOCK_SIZE_M"], E
++    # )
++    sorted_token_ids, expert_ids, num_tokens_post_padded = dcu_moe_align_block_size(
+         topk_ids, config["BLOCK_SIZE_M"], E
+     )
+ 
+@@ -460,7 +453,7 @@
+     filter_expert: bool,
+     hooks: Optional[Any] = None,
+     swiglu_limit: Optional[float] = None,
+-    gate_up_interleaved: bool = True,
++    interleaved: bool = True,
+ ) -> torch.Tensor:
+     """Run the MoE kernel/activation/kernel/combine sequence in a single shot.
+ 
+@@ -473,12 +466,6 @@
+     topk = topk_ids.shape[1]
+     compute_type = tl.bfloat16 if hidden_states.dtype == torch.bfloat16 else tl.float16
+ 
+-    # LoRA hooks consume and update route-major intermediate buffers. The TMA
+-    # down path keeps those buffers in expert-sorted, block-padded order, which
+-    # is incompatible with the hook contract.
+-    if hooks and (hooks.after_gate_up is not None or hooks.after_down is not None):
+-        down_moe_use_tma = False
+-
+     padded_tokens = (
+         min(num_tokens * topk, E + 1) * (config["BLOCK_SIZE_M"] - 1)
+         if down_moe_use_tma
+@@ -496,17 +483,10 @@
+     elif inplace:
+         out_hidden_states = hidden_states
+     else:
+-        # Allocate the MoE output in the NCCL symmetric memory pool when symmetric
+-        # allocation is required, so the downstream all-reduce takes the low-latency
+-        # symmetric path. Only this output enters the pool; the intermediate caches
+-        # below stay on the default allocator to bound pool occupancy.
+-        with use_symmetric_memory(
+-            get_tp_group(), disabled=not is_allocation_symmetric()
+-        ):
+-            out_hidden_states = torch.empty_like(hidden_states)
++        out_hidden_states = torch.empty_like(hidden_states)
+ 
+     use_fused_moe_sum_all_reduce = (
+-        get_server_args().enable_fused_moe_sum_all_reduce
++        get_global_server_args().enable_fused_moe_sum_all_reduce
+         and (not no_combine)
+         and (topk > 2)
+         and (not use_int8_w8a16)
+@@ -546,8 +526,28 @@
+         filter_expert=filter_expert,
+     )
+ 
++    # Diagnostic: check if first kernel produced any output
++    if not getattr(fused_experts_impl, '_kernel_diag_done', False):
++        fused_experts_impl._kernel_diag_done = True
++        import os
++        rank = os.environ.get("RANK", os.environ.get("LOCAL_RANK", "?"))
++        torch.cuda.synchronize()
++        c1 = intermediate_cache1.float()
++        with open('/workspace/kernel_seq_diag.txt', 'a') as _f:
++            _f.write(f"rank={rank} after_w13_kernel:\n")
++            _f.write(f"  cache1: shape={list(c1.shape)} mean={c1.mean().item():.6f} std={c1.std().item():.6f} "
++                     f"min={c1.min().item():.4f} max={c1.max().item():.4f} "
++                     f"nonzero={c1.abs().sum().item():.4f}\n")
++            _f.write(f"  hidden_states: shape={list(hidden_states.shape)} "
++                     f"mean={hidden_states.float().mean().item():.6f}\n")
++            _f.write(f"  w1: shape={list(w1.shape)} dtype={w1.dtype}\n")
++            _f.write(f"  config={config}\n")
++            _f.write(f"  use_int4_w4a16={use_int4_w4a16} block_shape={block_shape}\n")
++            _f.write(f"  sorted_token_ids[:8]={sorted_token_ids[:8].tolist()}\n")
++            _f.write(f"  expert_ids[:8]={expert_ids[:8].tolist()}\n")
++            _f.write(f"  num_tokens_post_padded={num_tokens_post_padded.tolist()}\n")
++
+     if hooks and hooks.after_gate_up:
+-        # Hooks expect intermediate_cache1 shaped (num_tokens, topk, N); the
+         # underlying buffer is laid out as (total_tokens, N) where
+         # total_tokens = num_tokens * topk (+ TMA padding). Slice off any
+         # padding and reshape for the hook, which writes in-place on the view.
+@@ -571,7 +571,7 @@
+         # - swiglu_limit != None: DeepSeek V4 swiglu clamp + silu_and_mul (CUDA/HIP only)
+         if gemm1_alpha is not None:
+             assert gemm1_limit is not None
+-            if gate_up_interleaved:
++            if interleaved:
+                 intermediate_cache2 = swiglu_gpt_oss_sigmoid_alpha(
+                     intermediate_cache1.view(-1, N),
+                     gemm1_alpha,
+@@ -616,7 +616,7 @@
+ 
+             if not filter_expert:
+                 if swiglu_limit_for_silu_and_mul_clamp is not None:
+-                    from sglang.kernels.ops.attention.dsv4 import silu_and_mul_clamp
++                    from sglang.jit_kernel.deepseek_v4 import silu_and_mul_clamp
+ 
+                     silu_and_mul_clamp(
+                         intermediate_cache1.view(-1, N),
+@@ -748,6 +748,17 @@
+         router_topk=topk,
+     )
+ 
++    # Diagnostic: check w2 kernel output and combine
++    if not getattr(fused_experts_impl, '_kernel_diag2_done', False):
++        fused_experts_impl._kernel_diag2_done = True
++        torch.cuda.synchronize()
++        c2 = intermediate_cache2.float()
++        c3 = intermediate_cache3.float()
++        with open('/workspace/kernel_seq_diag.txt', 'a') as _f:
++            _f.write(f"  after_silu cache2: mean={c2.mean().item():.6f} std={c2.std().item():.6f} nonzero={c2.abs().sum().item():.4f}\n")
++            _f.write(f"  after_w2_kernel cache3: shape={list(c3.shape)} mean={c3.mean().item():.6f} std={c3.std().item():.6f} nonzero={c3.abs().sum().item():.4f}\n")
++            _f.write(f"  out_hidden_states before combine: mean={out_hidden_states.float().mean().item():.6f}\n")
++
+     if hooks and hooks.after_down:
+         hooks.after_down(
+             intermediate_cache2, intermediate_cache3, topk_weights, topk_ids
+@@ -775,7 +786,7 @@
+             ).squeeze(dim=1)
+         else:
+             # According to micro benchmark results, torch.compile can get better performance for small token.
+-            if _use_moe_sum_reduce_torch_compile(num_tokens):
++            if num_tokens <= 32:
+                 moe_sum_reduce_torch_compile(
+                     intermediate_cache3.view(*intermediate_cache3.shape),
+                     out_hidden_states,
+@@ -794,28 +805,30 @@
+                 out_hidden_states,
+             )
+         else:
+-            # According to micro benchmark results, torch.compile can get better performance for small token.
+-            if _use_moe_sum_reduce_torch_compile(num_tokens):
+-                moe_sum_reduce_torch_compile(
+-                    intermediate_cache3.view(*intermediate_cache3.shape),
+-                    out_hidden_states,
+-                    routed_scaling_factor,
+-                )
+-            else:
+-                moe_sum_reduce_triton(
+-                    intermediate_cache3.view(*intermediate_cache3.shape),
+-                    out_hidden_states,
+-                    routed_scaling_factor,
+-                )
++            # Use PyTorch native sum — moe_sum_reduce_triton has issues on gfx928
++            if not getattr(fused_experts_impl, '_combine_diag_done', False):
++                fused_experts_impl._combine_diag_done = True
++                with open('/workspace/combine_diag.txt', 'a') as _f:
++                    _f.write(f"BEFORE combine:\n")
++                    _f.write(f"  cache3: shape={list(intermediate_cache3.shape)} mean={intermediate_cache3.float().mean().item():.6f}\n")
++                    _f.write(f"  out_hs: shape={list(out_hidden_states.shape)} mean={out_hidden_states.float().mean().item():.6f} ptr={out_hidden_states.data_ptr()}\n")
++                    _f.write(f"  hidden_states ptr={hidden_states.data_ptr()}\n")
++                    _f.write(f"  inplace={inplace}, _use_intermediate={_use_intermediate}\n")
++            torch.sum(intermediate_cache3, dim=1, out=out_hidden_states)
++            if routed_scaling_factor != 1.0:
++                out_hidden_states.mul_(routed_scaling_factor)
++            if not getattr(fused_experts_impl, '_combine_diag2_done', False):
++                fused_experts_impl._combine_diag2_done = True
++                with open('/workspace/combine_diag.txt', 'a') as _f:
++                    _f.write(f"AFTER combine:\n")
++                    _f.write(f"  out_hs: mean={out_hidden_states.float().mean().item():.6f} ptr={out_hidden_states.data_ptr()}\n")
++                    _f.write(f"  hidden_states: mean={hidden_states.float().mean().item():.6f} ptr={hidden_states.data_ptr()}\n")
+     elif _is_xpu:
+-        if topk == 1 and routed_scaling_factor == 1.0 and not _use_intermediate:
+-            pass  # we wrote directly into out_hidden_states
+-        else:
+-            moe_sum_reduce(
+-                intermediate_cache3.view(*intermediate_cache3.shape),
+-                out_hidden_states,
+-                routed_scaling_factor,
+-            )
++        moe_sum_reduce(
++            intermediate_cache3.view(*intermediate_cache3.shape),
++            out_hidden_states,
++            routed_scaling_factor,
++        )
+     else:
+         if _has_vllm_ops:
+             vllm_ops.moe_sum(
+@@ -865,7 +878,7 @@
+     gemm1_limit: Optional[float] = None,
+     filter_expert: bool = True,
+     swiglu_limit: Optional[float] = None,
+-    gate_up_interleaved: bool = True,
++    interleaved: bool = True,
+ ):
+     padded_size = padding_size
+     if not (use_fp8_w8a8 or use_int8_w8a8) or block_shape is not None or _use_aiter:
+@@ -941,7 +954,7 @@
+         filter_expert=filter_expert,
+         hooks=None,
+         swiglu_limit=swiglu_limit,
+-        gate_up_interleaved=gate_up_interleaved,
++        interleaved=interleaved,
+     )
+ 
+ 
+
