@@ -34,14 +34,15 @@ for f in "${!FILE_MAP[@]}"; do
   fi
 done
 
-# MoE kernel configs (K100_AI tuned)
-CONFIG_DIR="$SGLANG_ROOT/layers/moe/moe_runner/triton_utils/configs/triton_3_5_1"
-ADDED_DIR="$SCRIPT_DIR/sglang_patches/added/configs"
-mkdir -p "$CONFIG_DIR"
-for cfg in "$ADDED_DIR"/*.json; do
-  cp "$cfg" "$CONFIG_DIR/"
-  echo "  ✓ $(basename $cfg) → configs/"
-done
+# MoE kernel configs (K100_AI tuned) — optional, improves performance
+# Uncomment below to apply tuned configs:
+# CONFIG_DIR="$SGLANG_ROOT/layers/moe/moe_runner/triton_utils/configs/triton_3_5_1"
+# ADDED_DIR="$SCRIPT_DIR/sglang_patches/added/configs"
+# mkdir -p "$CONFIG_DIR"
+# for cfg in "$ADDED_DIR"/*.json; do
+#   cp "$cfg" "$CONFIG_DIR/"
+#   echo "  ✓ $(basename $cfg) → configs/"
+# done
 
 echo ""
 echo "=== Patch applied successfully ==="
