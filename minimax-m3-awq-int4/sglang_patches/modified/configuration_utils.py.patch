@@ -1,0 +1,9 @@
+--- a/transformers/configuration_utils.py
++++ b/transformers/configuration_utils.py
+@@ -62,6 +62,7 @@
+ ALLOWED_LAYER_TYPES = (
+     "full_attention",
+     "sliding_attention",
++    "minimax_m3_sparse",  # used in MiniMax-M3
+     ...
+ )
