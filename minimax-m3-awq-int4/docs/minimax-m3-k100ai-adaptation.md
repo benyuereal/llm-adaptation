@@ -61,39 +61,84 @@ sglang serve \
 
 ## 二、Patch 使用方法
 
-Patch 文件位于 `/workspace/patch/`。
-
-### 2.1 方法一：Unified Patch
+### 2.1 获取 Patch
 
 ```bash
-cd /usr/local/lib/python3.10/dist-packages
-patch -p1 < /workspace/patch/minimax-m3-awq-dcu.patch
+cd /workspace
+git clone git@github.com:benyuereal/llm-adaptation.git
+cd llm-adaptation/minimax-m3-awq-int4
 ```
 
-如有 reject，手动处理或使用方法二。
+仓库结构：
+```
+minimax-m3-awq-int4/
+├── README.md                 # 概览
+├── apply_patch.sh            # 一键应用脚本
+├── start.sh                  # 启动脚本
+├── docs/                     # 文档
+├── sglang_patches/
+│   ├── minimax-m3-awq-int4.patch  # unified diff（备用）
+│   ├── modified/             # 修改后的源文件 + 独立 .patch
+│   │   ├── compressed_tensors.py
+│   │   ├── compressed_tensors.py.patch
+│   │   ├── compressed_tensors_wNa16.py
+│   │   ├── compressed_tensors_wNa16.py.patch
+│   │   ├── compressed_tensors_wNa16_moe.py
+│   │   ├── compressed_tensors_wNa16_moe.py.patch
+│   │   ├── configuration_utils.py
+│   │   ├── configuration_utils.py.patch
+│   │   ├── fused_moe.py
+│   │   ├── fused_moe.py.patch
+│   │   ├── minimax_m3.py
+│   │   ├── minimax_m3.py.patch
+│   │   ├── minimax_m3_vl.py
+│   │   └── minimax_m3_vl.py.patch
+│   └── diagnostics/          # 诊断埋点备份（调试用）
+```
 
-### 2.2 方法二：文件直接替换
+### 2.2 一键应用（推荐）
+
+```bash
+bash apply_patch.sh
+```
+
+脚本会将 `sglang_patches/modified/` 下的文件复制到对应位置，并自动备份原文件（`.bak`）。
+
+### 2.3 启动服务
+
+```bash
+bash start.sh
+```
+
+### 2.4 手动应用（备用）
+
+如需手动操作：
 
 ```bash
 SGLANG_ROOT=/usr/local/lib/python3.10/dist-packages/sglang/srt
-cp /workspace/patch/files/compressed_tensors.py       $SGLANG_ROOT/layers/quantization/compressed_tensors/compressed_tensors.py
-cp /workspace/patch/files/compressed_tensors_wNa16.py $SGLANG_ROOT/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16.py
-cp /workspace/patch/files/compressed_tensors_wNa16_moe.py $SGLANG_ROOT/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16_moe.py
-cp /workspace/patch/files/minimax_m3.py               $SGLANG_ROOT/models/minimax_m3.py
-cp /workspace/patch/files/minimax_m3_vl.py            $SGLANG_ROOT/models/minimax_m3_vl.py
-cp /workspace/patch/files/fused_moe.py                $SGLANG_ROOT/layers/moe/moe_runner/triton_utils/fused_moe.py
+TRANSFORMERS_ROOT=/usr/local/lib/python3.10/dist-packages/transformers
+PATCH_DIR=sglang_patches/modified
+
+cp $PATCH_DIR/compressed_tensors.py       $SGLANG_ROOT/layers/quantization/compressed_tensors/compressed_tensors.py
+cp $PATCH_DIR/compressed_tensors_wNa16.py $SGLANG_ROOT/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16.py
+cp $PATCH_DIR/compressed_tensors_wNa16_moe.py $SGLANG_ROOT/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16_moe.py
+cp $PATCH_DIR/minimax_m3.py               $SGLANG_ROOT/models/minimax_m3.py
+cp $PATCH_DIR/minimax_m3_vl.py            $SGLANG_ROOT/models/minimax_m3_vl.py
+cp $PATCH_DIR/fused_moe.py                $SGLANG_ROOT/layers/moe/moe_runner/triton_utils/fused_moe.py
+cp $PATCH_DIR/configuration_utils.py      $TRANSFORMERS_ROOT/configuration_utils.py
 ```
 
-### 2.3 修改文件列表
+### 2.5 修改文件列表
 
-| 文件（相对 sglang/srt/） | 修改内容 |
-|---------------------------|----------|
-| `layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16.py` | ZP reshape permute 修复 + HIP dequant |
-| `layers/quantization/compressed_tensors/compressed_tensors.py` | `symmetric` 参数传递 |
-| `layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16_moe.py` | MoE zp overflow 修复 |
-| `models/minimax_m3.py` | dense/MoE 层判断 + quant_config 控制 |
-| `models/minimax_m3_vl.py` | 权重名映射 + fallback |
-| `layers/moe/moe_runner/triton_utils/fused_moe.py` | HIP combine 改为 torch.sum |
+| 文件 | 包 | 修改内容 |
+|------|-----|----------|
+| `compressed_tensors_wNa16.py` | sglang | ZP reshape permute 修复 + HIP dequant |
+| `compressed_tensors.py` | sglang | `symmetric` 参数传递 |
+| `compressed_tensors_wNa16_moe.py` | sglang | MoE zp overflow 修复 |
+| `minimax_m3.py` | sglang | dense/MoE 层判断 + quant_config 控制 |
+| `minimax_m3_vl.py` | sglang | 权重名映射 + fallback |
+| `fused_moe.py` | sglang | HIP combine 改为 torch.sum |
+| `configuration_utils.py` | transformers | ALLOWED_LAYER_TYPES 加入 minimax_m3_sparse |
 
 ---
 
