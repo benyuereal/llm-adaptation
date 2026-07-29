@@ -1,0 +1,4 @@
+--- Target: /usr/local/lib/python3.10/dist-packages/sglang/srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16.py
++++ Modified: compressed_tensors_wNa16.py
+# Apply: cp compressed_tensors_wNa16.py /usr/local/lib/python3.10/dist-packages/sglang/srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16.py
+# This is the complete modified file, not a diff.

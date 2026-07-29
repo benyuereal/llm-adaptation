@@ -1,0 +1,4 @@
+--- Target: /usr/local/lib/python3.10/dist-packages/sglang/srt/models/minimax_m3.py
++++ Modified: minimax_m3.py
+# Apply: cp minimax_m3.py /usr/local/lib/python3.10/dist-packages/sglang/srt/models/minimax_m3.py
+# This is the complete modified file, not a diff.

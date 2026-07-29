@@ -1,60 +1,47 @@
-# MiniMax-M3 AWQ DCU Patch for SGLang
+# MiniMax-M3 AWQ INT4 — K100AI DCU 适配
 
-This patch contains modifications to SGLang (v0.0.0.dev12695+g1df793665) to support
-MiniMax-M3 AWQ quantized model inference on DCU (HIP/ROCm) hardware.
+## 适配成果
 
-## Files Modified
+| 指标 | 数据 |
+|------|------|
+| 模型 | MiniMax-M3-AWQ-INT4 (456B, 128 experts MoE) |
+| 硬件 | 8× K100AI DCU (gfx928), TP=8 |
+| 单用户 decode | ~19 tokens/s (CUDA Graph) |
+| 精度验证 | MoE max_diff=0.024, Attention max_diff<0.003 |
 
-| File (relative to `sglang/srt/`) | Description |
-|---|---|
-| `layers/quantization/compressed_tensors/compressed_tensors.py` | Added `symmetric=weight_quant.symmetric` parameter |
-| `layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16.py` | ZP reshape fix (`permute(0,2,1)`), `_process_weights_hip` and `_apply_weights_hip` modifications |
-| `layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16_moe.py` | Overflow fix, per-expert fill, diagnostics |
-| `models/minimax_m3.py` | `mlp_layer_types` support, dense layer `quant_config=None`, shared_experts fix, attention quant_config logic, `_is_layer_sparse` helper |
-| `models/minimax_m3_vl.py` | `out_proj->o_proj` mapping, `weight_packed` fallback, load diagnostics |
-| `layers/moe/moe_runner/triton_utils/fused_moe.py` | HIP combine changed to `torch.sum`, diagnostics |
-
-## Method 1: Apply Unified Patch
+## 快速使用
 
 ```bash
-# Navigate to the sglang package directory
-cd /usr/local/lib/python3.10/dist-packages/
+# 1. 应用 patch
+bash apply_patch.sh
 
-# Apply the patch (dry-run first)
-patch -p1 --dry-run < /path/to/minimax-m3-awq-dcu.patch
-
-# Apply for real
-patch -p1 < /path/to/minimax-m3-awq-dcu.patch
+# 2. 启动服务
+bash start.sh
 ```
 
-Note: The patch uses paths like `a/sglang/srt/...` and `b/sglang/srt/...`, so apply from
-the `dist-packages/` (or `site-packages/`) directory with `-p1`.
+## 目录结构
 
-## Method 2: Direct File Replacement
-
-Copy the modified files directly over the installed package files:
-
-```bash
-SGLANG_SRT="/usr/local/lib/python3.10/dist-packages/sglang/srt"
-
-cp files/layers/quantization/compressed_tensors/compressed_tensors.py \
-   "$SGLANG_SRT/layers/quantization/compressed_tensors/compressed_tensors.py"
-
-cp files/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16.py \
-   "$SGLANG_SRT/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16.py"
-
-cp files/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16_moe.py \
-   "$SGLANG_SRT/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16_moe.py"
-
-cp files/models/minimax_m3.py "$SGLANG_SRT/models/minimax_m3.py"
-cp files/models/minimax_m3_vl.py "$SGLANG_SRT/models/minimax_m3_vl.py"
-
-cp files/layers/moe/moe_runner/triton_utils/fused_moe.py \
-   "$SGLANG_SRT/layers/moe/moe_runner/triton_utils/fused_moe.py"
+```
+├── README.md                 # 本文件
+├── apply_patch.sh            # 一键应用脚本
+├── start.sh                  # 启动脚本
+├── docs/
+│   ├── minimax-m3-k100ai-adaptation.md  # 适配技术文档
+│   └── kerminal-fae-evaluation.md       # FAE 评估报告
+└── sglang_patches/
+    ├── README.md             # patch 说明
+    ├── minimax-m3-awq-dcu.patch  # unified diff（备用）
+    ├── modified/             # 修改后的源文件 + .patch
+    └── diagnostics/          # 诊断埋点备份
 ```
 
-## Compatibility
+## 修改文件列表
 
-- **Base SGLang version**: 0.0.0.dev12695+g1df793665 (built 2026-06-05)
-- **Target hardware**: DCU (HIP/ROCm)
-- **Model**: MiniMax-M3 with AWQ quantization
+| 文件 | 修改内容 |
+|------|----------|
+| compressed_tensors_wNa16.py | ZP reshape permute 修复 |
+| compressed_tensors.py | symmetric 参数传递 |
+| compressed_tensors_wNa16_moe.py | MoE zp overflow 修复 |
+| minimax_m3.py | dense/MoE 层判断 + quant_config 控制 |
+| minimax_m3_vl.py | 权重名映射 |
+| fused_moe.py | HIP combine 兼容性 |

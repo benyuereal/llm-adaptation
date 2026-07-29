@@ -1,0 +1,4 @@
+--- Target: /usr/local/lib/python3.10/dist-packages/sglang/srt/layers/moe/moe_runner/triton_utils/fused_moe.py
++++ Modified: fused_moe.py
+# Apply: cp fused_moe.py /usr/local/lib/python3.10/dist-packages/sglang/srt/layers/moe/moe_runner/triton_utils/fused_moe.py
+# This is the complete modified file, not a diff.

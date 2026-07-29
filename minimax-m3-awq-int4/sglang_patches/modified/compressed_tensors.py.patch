@@ -1,0 +1,4 @@
+--- Target: /usr/local/lib/python3.10/dist-packages/sglang/srt/layers/quantization/compressed_tensors/compressed_tensors.py
++++ Modified: compressed_tensors.py
+# Apply: cp compressed_tensors.py /usr/local/lib/python3.10/dist-packages/sglang/srt/layers/quantization/compressed_tensors/compressed_tensors.py
+# This is the complete modified file, not a diff.
