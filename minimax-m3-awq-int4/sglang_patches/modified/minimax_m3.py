@@ -778,8 +778,22 @@ class MiniMaxM3DecoderLayer(nn.Module):
 
         sparse_attention_config = getattr(config, "sparse_attention_config", None)
         if sparse_attention_config is not None:
-            _, sparse_layer_ids = get_minimax_sparse_layer_ids(sparse_attention_config)
-            is_sparse_attention_layer = layer_id in sparse_layer_ids
+            # [FIX] 优先用 layer_types 判断 sparse attention 层。
+            # 原逻辑用 get_minimax_sparse_layer_ids (读 sparse_attention_freq), 但本
+            # checkpoint 的 sparse_attention_freq 全为 0 (占位值), 导致 sparse_layer_ids
+            # 为空 -> 不创建 index 权重 -> checkpoint 的 index_q/k_proj/norm 权重全部
+            # not found 丢弃 -> 闪电索引器权重全零 -> 长序列(GPQA)选块全错。
+            # layer_types[i] == "minimax_m3_sparse" 才是 sparse 层的正确标识。
+            layer_types = getattr(config, "layer_types", None)
+            if layer_types is not None and layer_id < len(layer_types):
+                is_sparse_attention_layer = (
+                    layer_types[layer_id] == "minimax_m3_sparse"
+                )
+            else:
+                _, sparse_layer_ids = get_minimax_sparse_layer_ids(
+                    sparse_attention_config
+                )
+                is_sparse_attention_layer = layer_id in sparse_layer_ids
             disable_value_layer_ids = set(
                 get_minimax_sparse_disable_value_layer_ids(sparse_attention_config)
             )

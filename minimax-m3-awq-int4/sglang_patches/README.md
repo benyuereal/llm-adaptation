@@ -10,8 +10,9 @@ MiniMax-M3 AWQ quantized model inference on DCU (HIP/ROCm) hardware.
 | `layers/quantization/compressed_tensors/compressed_tensors.py` | Added `symmetric=weight_quant.symmetric` parameter |
 | `layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16.py` | ZP reshape fix (`permute(0,2,1)`), `_process_weights_hip` and `_apply_weights_hip` modifications |
 | `layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16_moe.py` | Overflow fix, per-expert fill, diagnostics |
-| `models/minimax_m3.py` | `mlp_layer_types` support, dense layer `quant_config=None`, shared_experts fix, attention quant_config logic, `_is_layer_sparse` helper |
+| `models/minimax_m3.py` | `mlp_layer_types` support, dense layer `quant_config=None`, shared_experts fix, attention quant_config logic, `_is_layer_sparse` helper, **lightning indexer fix (use `layer_types` for sparse-layer detection)** |
 | `models/minimax_m3_vl.py` | `out_proj->o_proj` mapping, `weight_packed` fallback, load diagnostics |
+| `configs/model_config.py` | **Lightning indexer fix**: `get_minimax_sparse_attention_config` injects `layer_types`; `get_minimax_sparse_layer_ids` prefers `layer_types` over all-zero `sparse_attention_freq` |
 | `layers/moe/moe_runner/triton_utils/fused_moe.py` | HIP combine changed to `torch.sum`, diagnostics |
 
 ## Method 1: Apply Unified Patch

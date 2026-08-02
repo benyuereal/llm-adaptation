@@ -18,6 +18,7 @@ declare -A FILE_MAP=(
   ["compressed_tensors_wNa16_moe.py"]="$SGLANG_ROOT/layers/quantization/compressed_tensors/schemes/compressed_tensors_wNa16_moe.py"
   ["minimax_m3.py"]="$SGLANG_ROOT/models/minimax_m3.py"
   ["minimax_m3_vl.py"]="$SGLANG_ROOT/models/minimax_m3_vl.py"
+  ["model_config.py"]="$SGLANG_ROOT/configs/model_config.py"
   ["fused_moe.py"]="$SGLANG_ROOT/layers/moe/moe_runner/triton_utils/fused_moe.py"
   ["configuration_utils.py"]="$TRANSFORMERS_ROOT/configuration_utils.py"
 )
