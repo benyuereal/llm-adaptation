@@ -19,7 +19,7 @@
 | `modified/minimax_sparse_backend.py{,.patch}` | sparse backend 兜底 EAGLE3 TARGET_VERIFY 字段补全 + cuda graph 7 处 graph-unsafe 修复 |
 | `modified/utils.py{,.patch}` | `get_cu_seqblocks` graph-safe(host sync → 静态上界) |
 | `tests/test_m3_eagle3_verify_sparse.py` | 单元测试(不起服务,验证 verify 字段补全逻辑) |
-| `docs/MiniMax-M3-EAGLE3-工作记录.md` | 完整工作记录(背景/踩坑/修复/选型/待办) |
+| `docs/MiniMax-M3-EAGLE3-work-log.md` | 完整工作记录(背景/踩坑/修复/选型/待办) |
 
 ## 一键使用
 
@@ -60,4 +60,4 @@ EAGLE3 + MiniMax-M3 + sparse attention 三者组合在 sglang 上游有 4 处缺
 
 本目录只含 **EAGLE3 投机解码** 专属改动。量化适配(W4A16 MoE kernel、compressed_tensors、sparse attention 共享内存等)在上级 `sglang_patches/modified/`,需先应用量化 patch 让模型能加载,再应用本 EAGLE3 patch。
 
-详见 `docs/MiniMax-M3-EAGLE3-工作记录.md`。
+详见 `docs/MiniMax-M3-EAGLE3-work-log.md`。
