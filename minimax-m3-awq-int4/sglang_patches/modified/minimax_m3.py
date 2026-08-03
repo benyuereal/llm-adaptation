@@ -25,6 +25,7 @@ from transformers import PretrainedConfig
 
 from sglang.srt.batch_overlap.two_batch_overlap import model_forward_maybe_tbo
 from sglang.srt.configs.model_config import (
+    get_minimax_sparse_attention_config,
     get_minimax_sparse_disable_value_layer_ids,
     get_minimax_sparse_layer_ids,
 )
@@ -258,6 +259,17 @@ class MiniMaxM3MoE(nn.Module):
             gemm1_clamp_limit=config.swiglu_limit,
             prefix=add_prefix("experts", prefix),
             interleaved=False,
+            # [FIX] routed_scaling_factor 之前漏传给 experts(FusedMoE runner),
+            # 只传给了 self.topk。但 fused_topk 的 sigmoid 分支(sgl_kernel.topk_sigmoid)
+            # 签名无 rsf 参数,只做 renorm(行和=1.0),不在 topk_weights 上乘 rsf;
+            # vllm 则在 topk_sigmoid kernel 内部乘 rsf(行和=2.0)。sglang 的 rsf 本应
+            # 由 runner combine 阶段补乘(fused_moe.py: out.mul_(routed_scaling_factor)),
+            # 但 runner 的 routed_scaling_factor 来自 MoeRunnerConfig,默认 None -> 不乘。
+            # 结果:每层 routed experts 加权和比正确值小 rsf(=2.0)倍,shared 不受影响,
+            # 57 层 MoE 系统性偏差 -> 所有评估集"流畅但不聪明"。实测:补传后 combine 乘
+            # 2.0,完整 MoE 层输出与 vllm 逐位一致(cosine=1.0)。详见
+            # /workspace/verify/test_moe_layer_compare.py 与 test_topk_sigmoid_compare.py。
+            routed_scaling_factor=self.routed_scaling_factor,
         )
         # use sigmoid_topk, instead of grouped_topk
         self.topk = TopK(
@@ -794,8 +806,17 @@ class MiniMaxM3DecoderLayer(nn.Module):
                     sparse_attention_config
                 )
                 is_sparse_attention_layer = layer_id in sparse_layer_ids
+            # [FIX Bug B] 用 get_minimax_sparse_attention_config 取得带 layer_types
+            # 的 sparse_cfg (它会注入 layer_types). text_config.sparse_attention_config
+            # 这个原始 dict 不含 layer_types, 直接传给 get_minimax_sparse_layer_ids /
+            # get_minimax_sparse_disable_value_layer_ids 会 fallback 到
+            # sparse_attention_freq (本 checkpoint 全 0 = 空) -> disable 恒 False.
+            # 必须和 backend (minimax_sparse_backend.py 也用 get_minimax_sparse_attention_config)
+            # 用同一份带 layer_types 的 sparse_cfg, 否则 model 层 disable=True 传 idx_v=None
+            # 但 backend disable_value=False 试图 set_index_kv_buffer(idx_v=None) 会崩溃.
+            sparse_cfg_full = get_minimax_sparse_attention_config(config)
             disable_value_layer_ids = set(
-                get_minimax_sparse_disable_value_layer_ids(sparse_attention_config)
+                get_minimax_sparse_disable_value_layer_ids(sparse_cfg_full)
             )
             disable_index_value = layer_id in disable_value_layer_ids
         else:

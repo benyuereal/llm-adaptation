@@ -1,17 +1,43 @@
---- a/sglang/srt/configs/model_config.py	2026-08-02 00:00:00.000000000 +0800
-+++ b/sglang/srt/configs/model_config.py	2026-08-02 00:00:00.000000000 +0800
-@@ -145,10 +145,32 @@
-         cfg = getattr(config, "sparse_attention_config", None)
+--- a/sglang/srt/configs/model_config.py
++++ b/sglang/srt/configs/model_config.py
+@@ -135,20 +135,52 @@
+ 
+ 
+ def get_minimax_sparse_attention_config(config: PretrainedConfig) -> dict:
++    # [FIX Bug A] text_config may be a PreTrainedConfig object OR a plain dict.
++    # sglang's get_config loads MiniMaxM3VLConfig with text_config as dict,
++    # where getattr(dict, "layer_types") returns None (must use dict.get).
++    # Use a unified accessor to handle both cases.
++    def _get(obj, key, default=None):
++        if obj is None:
++            return default
++        if isinstance(obj, dict):
++            return obj.get(key, default)
++        return getattr(obj, key, default)
++
+     text_cfg = getattr(config, "text_config", None)
+-    cfg = (
+-        getattr(text_cfg, "sparse_attention_config", None)
+-        if text_cfg is not None
+-        else None
+-    )
++    cfg = _get(text_cfg, "sparse_attention_config", None)
+     if cfg is None:
+-        cfg = getattr(config, "sparse_attention_config", None)
++        cfg = _get(config, "sparse_attention_config", None)
      if cfg is None:
          raise ValueError("Could not find sparse config. Is it MiniMax M3 Sparse model?")
 +    # [FIX] 注入 layer_types 到 sparse_cfg, 供 get_minimax_sparse_layer_ids 使用。
 +    # 本 checkpoint 的 sparse_attention_freq 全为 0 (占位值), 用它判断会导致
 +    # sparse_layer_ids 为空 -> 索引器权重不创建/不加载 -> 长序列选块全错。
 +    # layer_types[i] == "minimax_m3_sparse" 才是 sparse 层的正确标识。
-+    if text_cfg is not None and not isinstance(cfg, dict):
++    # layer_types 在 text_config (非顶层 config), 必须从 text_config 取。
++    if not isinstance(cfg, dict):
 +        cfg = dict(cfg)
-+    if text_cfg is not None and "layer_types" not in cfg:
-+        layer_types = getattr(text_cfg, "layer_types", None)
++    if "layer_types" not in cfg:
++        layer_types = _get(text_cfg, "layer_types", None)
++        if layer_types is None:
++            layer_types = _get(config, "layer_types", None)
 +        if layer_types is not None:
 +            cfg["layer_types"] = layer_types
      return cfg
@@ -33,3 +59,28 @@
      sparse_freq = sparse_cfg["sparse_attention_freq"]
      dense_layer_ids = [i for i, f in enumerate(sparse_freq) if f == 0]
      sparse_layer_ids = [i for i, f in enumerate(sparse_freq) if f != 0]
+@@ -157,9 +189,21 @@
+ 
+ def get_minimax_sparse_disable_value_layer_ids(sparse_cfg: dict) -> list[int]:
+     flags = sparse_cfg.get("sparse_disable_index_value")
+-    if flags is None:
+-        return []
+-    return [i for i, f in enumerate(flags) if f != 0]
++    if flags is not None:
++        return [i for i, f in enumerate(flags) if f != 0]
++    # [FIX Bug B] MiniMax-M3 的 lightning indexer 设计上只有 index_q/k_proj(选块),
++    # 没有 index_v_proj / index_o_proj(BF16 原始与 AWQ 权重均如此, 属"设计甲":
++    # index head 只对 Q/K 算 score 决定 topk 选块, V/O 不参与输出). config 的
++    # quantization_config.ignore 也只 ignore `index_[qk]_proj`(不含 v/o), 证明 v/o
++    # 设计上不存在. 原 sglang 在 config 缺 sparse_disable_index_value 时默认返回 []
++    # -> disable_index_value 恒 False -> 无条件构造 index_v/o_proj 并套量化 ->
++    # checkpoint 无此权重 -> weight_packed/scale 保持 torch.empty(CUDA零页) -> 全零.
++    # 数值碰巧无害但依赖未定义行为(非确定性来源)+ 每个 sparse 层白算 2 假 proj +
++    # 1 假 sparse attention(吞吐损失). 修复: 无显式标志时默认对所有 sparse 层 disable.
++    # 要求 sparse_cfg 含 layer_types(由 get_minimax_sparse_attention_config 注入);
++    # 否则 fallback 到 sparse_attention_freq(本 checkpoint 全 0 = 空, 退回原行为).
++    _, sparse_layer_ids = get_minimax_sparse_layer_ids(sparse_cfg)
++    return sparse_layer_ids
+ 
+ 
+ def get_minimax_sparse_score_type(sparse_cfg: dict) -> str:

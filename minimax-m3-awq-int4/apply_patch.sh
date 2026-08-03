@@ -7,7 +7,12 @@ TRANSFORMERS_ROOT=/usr/local/lib/python3.10/dist-packages/transformers
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PATCH_DIR="$SCRIPT_DIR/sglang_patches/modified"
 
-echo "=== MiniMax-M3 AWQ INT4 DCU Patch ==="
+# Optional: runtime trace helper for non-determinism debugging. The patched
+# model no longer imports it (probes removed); install only if you need to
+# re-enable tracing for diagnosis.
+# cp "$SCRIPT_DIR/sglang_patches/diagnostics/runtime_trace.py" \
+#   "$SGLANG_ROOT/models/sglang_m3_runtime_trace.py"
+# echo "  ✓ runtime_trace.py → $SGLANG_ROOT/models/sglang_m3_runtime_trace.py"
 echo "Target: $SGLANG_ROOT"
 echo ""
 

@@ -1,0 +1,20 @@
+--- models/minimax_m3.py	2026-08-03 16:37:15.712859574 +0800
++++ models/minimax_m3.py	2026-08-03 16:37:15.775859179 +0800
+@@ -259,6 +259,17 @@
+             gemm1_clamp_limit=config.swiglu_limit,
+             prefix=add_prefix("experts", prefix),
+             interleaved=False,
++            # [FIX] routed_scaling_factor 之前漏传给 experts(FusedMoE runner),
++            # 只传给了 self.topk。但 fused_topk 的 sigmoid 分支(sgl_kernel.topk_sigmoid)
++            # 签名无 rsf 参数,只做 renorm(行和=1.0),不在 topk_weights 上乘 rsf;
++            # vllm 则在 topk_sigmoid kernel 内部乘 rsf(行和=2.0)。sglang 的 rsf 本应
++            # 由 runner combine 阶段补乘(fused_moe.py: out.mul_(routed_scaling_factor)),
++            # 但 runner 的 routed_scaling_factor 来自 MoeRunnerConfig,默认 None -> 不乘。
++            # 结果:每层 routed experts 加权和比正确值小 rsf(=2.0)倍,shared 不受影响,
++            # 57 层 MoE 系统性偏差 -> 所有评估集"流畅但不聪明"。实测:补传后 combine 乘
++            # 2.0,完整 MoE 层输出与 vllm 逐位一致(cosine=1.0)。详见
++            # /workspace/verify/test_moe_layer_compare.py 与 test_topk_sigmoid_compare.py。
++            routed_scaling_factor=self.routed_scaling_factor,
+         )
+         # use sigmoid_topk, instead of grouped_topk
+         self.topk = TopK(
