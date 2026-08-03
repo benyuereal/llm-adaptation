@@ -1,5 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # MiniMax M3 VL — vision tower + M3 (mixed sparse/dense MoE) text backbone.
+#
+# 合并版 = 量化 patch (weight_packed 回退 + out_proj 重映射)
+#        + EAGLE3 投机解码接口 (set_eagle3_layers_to_capture / get_embed_and_head
+#          / aux-aware forward / capture_aux_hidden_states flag)
+# 两者改的是同一文件,合并时以量化版为基底,增量打 EAGLE3 接口,确保
+# AWQ-INT4 量化权重加载与 EAGLE3 投机解码同时可用。
 
 import logging
 from typing import Iterable, List, Optional, Tuple
@@ -332,6 +338,10 @@ class MiniMaxM3SparseForConditionalGeneration(nn.Module):
         if "block_sparse_moe" in name:
             name = name.replace("block_sparse_moe", "mlp")
 
+        # Checkpoint has "out_proj" for attention output, model uses "o_proj"
+        if "self_attn.out_proj." in name:
+            name = name.replace("self_attn.out_proj.", "self_attn.o_proj.")
+
         layer_id = get_layer_id(name)
         if layer_id is not None and (
             layer_id < self.model.start_layer or layer_id >= self.model.end_layer
@@ -363,7 +373,15 @@ class MiniMaxM3SparseForConditionalGeneration(nn.Module):
             if new_name.endswith(".bias") and new_name not in params_dict:
                 continue
             if new_name not in params_dict:
-                continue
+                # compressed-tensors uses weight_packed instead of weight
+                if new_name.endswith(".weight"):
+                    packed_name = new_name[:-len(".weight")] + ".weight_packed"
+                    if packed_name in params_dict:
+                        new_name = packed_name
+                    else:
+                        continue
+                else:
+                    continue
             param = params_dict[new_name]
             param.weight_loader(param, loaded_weight, shard_id)
             return
@@ -395,8 +413,17 @@ class MiniMaxM3SparseForConditionalGeneration(nn.Module):
         if remapped is None:
             return
         if remapped not in params_dict:
-            logger.warning(f"Parameter {remapped} not found in params_dict")
-            return
+            # compressed-tensors uses weight_packed instead of weight
+            if remapped.endswith(".weight"):
+                packed_name = remapped[:-len(".weight")] + ".weight_packed"
+                if packed_name in params_dict:
+                    remapped = packed_name
+                else:
+                    logger.warning(f"Parameter {remapped} not found in params_dict")
+                    return
+            else:
+                logger.warning(f"Parameter {remapped} not found in params_dict")
+                return
         param = params_dict[remapped]
         weight_loader = getattr(param, "weight_loader", default_weight_loader)
         try:
