@@ -1,0 +1,24 @@
+--- a/sglang/srt/layers/attention/minimax_sparse_ops/common/utils.py	2026-07-23 19:00:49.260741174 +0800
++++ b/sglang/srt/layers/attention/minimax_sparse_ops/common/utils.py	2026-07-23 19:00:49.262741118 +0800
+@@ -132,8 +132,19 @@
+     cu_seqblocks_k[1:] = seqblocks_k
+     cu_seqblocks_q.cumsum_(0)
+     cu_seqblocks_k.cumsum_(0)
+-    all_seqblock_q = seqblocks_q.sum().item()
+-    all_seqblock_k = seqblocks_k.sum().item()
++    # all_seqblock_q/k = total blocks across all sequences. Used as a tensor
++    # shape (torch.full) downstream, so it must be a host int. .sum().item()
++    # is a host sync and is illegal under CUDA graph capture. Under capture,
++    # use the static upper bound batch_size * max_seqblock (over-allocates the
++    # score/topk_idx tensors slightly, but kernels index via cu_seqblocks so
++    # the extra slots are never accessed). Eager keeps the exact value.
++    if torch.cuda.is_current_stream_capturing():
++        batch_size = cu_seqblocks_q.shape[0] - 1
++        all_seqblock_q = batch_size * int(max_seqblock_q)
++        all_seqblock_k = batch_size * int(max_seqblock_k)
++    else:
++        all_seqblock_q = seqblocks_q.sum().item()
++        all_seqblock_k = seqblocks_k.sum().item()
+     return (
+         cu_seqblocks_q,
+         max_seqblock_q,
