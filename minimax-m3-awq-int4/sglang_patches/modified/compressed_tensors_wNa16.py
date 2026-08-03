@@ -439,13 +439,6 @@ class CompressedTensorsWNA16(CompressedTensorsLinearScheme):
             qweight, scales, zeros, num_bits, pack_factor, group_size, K, N
         )
 
-        # Diagnostic: check dequantized weight stats (first call per layer)
-        if not getattr(layer, '_hip_dequant_val_diag_done', False):
-            layer._hip_dequant_val_diag_done = True
-            dq = dequantized.float()
-            with open('/workspace/attn_dequant_diag.txt', 'a') as _f:
-                _f.write(f"dequant: shape={list(dq.shape)} mean={dq.mean().item():.6f} std={dq.std().item():.6f} "
-                         f"min={dq.min().item():.4f} max={dq.max().item():.4f}\n\n")
         out_shape = x.shape[:-1] + (N,)
         reshaped_x = x.reshape(-1, x.shape[-1])
         out = torch.matmul(reshaped_x, dequantized.t())

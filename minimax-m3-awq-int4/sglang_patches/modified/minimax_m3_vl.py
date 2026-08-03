@@ -354,14 +354,6 @@ class MiniMaxM3SparseForConditionalGeneration(nn.Module):
                 shard_id=shard_id,
                 expert_id=expert_id,
             )
-            # Diagnostic: check zp param state after first load for layer 3
-            if "zero_point" in name and "layers.3." in name and "w13" in new_name and expert_id == 0 and shard_id == "w1":
-                import os
-                rank = os.environ.get("RANK", os.environ.get("LOCAL_RANK", "?"))
-                zp_data = param.data[0]  # expert 0
-                nz = (zp_data != 0).sum().item()
-                with open('/workspace/zp_load_diag.txt', 'a') as _f:
-                    _f.write(f"AFTER_LOAD rank={rank} name={name} param_nz={nz}/{zp_data.numel()} sample={zp_data[0,:4].tolist()} data_ptr={param.data.data_ptr()} param_id={id(param)}\n")
             return
         if is_expert_weight:
             return
