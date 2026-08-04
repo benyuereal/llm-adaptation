@@ -1,38 +1,154 @@
-# eagle3-v2 — MiniMax-M3 EAGLE3 投机解码 patch (精简版)
+# eagle3-v2 — MiniMax-M3 EAGLE3 投机解码 patch (专用 verify kernel + graph buffer 根治 VMFault)
 
-> 本机实测可跑的最终版本。直接复用 sglang 标准 `minimax_sparse_prefill` 路径,
-> **不依赖任何 `verify/` 子模块**,不含已废弃的 Strategy A/B 实验代码。
+> 本机实测稳定可跑的最终版本 (并发 8、每请求 1000 tokens 压测无 VMFault,
+> accept rate ~0.59)。用专用 `verify_prefill` kernel + 预分配 graph buffer,
+> 两层根治 EAGLE3 TARGET_VERIFY 在 cuda graph 下的 KERNEL VMFault。
 
 ## 这是什么
 
 把当前容器里**实际在跑**的 sglang EAGLE3 适配代码打成 patch,可在别的容器一键安装,
-验证 EAGLE3 投机解码是否生效。
+验证 EAGLE3 投机解码是否生效。覆盖 12 个文件 (8 个既有 + 4 个 verify 子模块)。
 
-### 与 `eagle3` (v1) 的区别
+---
 
-| | eagle3 (v1) | **eagle3-v2** (本目录) |
-|---|---|---|
-| 改动文件数 | 3 + 新增 `verify/` 4 文件 | **6 个文件** (3 EAGLE3 接口 + 3 DCU/cuda-graph kernel) |
-| verify 路径 | Strategy B 新 kernel (`verify_sparse`) | **标准 `minimax_sparse_prefill`** |
-| 是否带 Strategy A | 是 (`seqlens_expand_triton`, 已废弃) | **否** |
-| VMFault 修复 | score 固定上界 + 临时 tensor 绕过 | **同根因, 更精简的实现** |
-| DCU shared-mem / cuda-graph 兼容 | ❌ 未含 (别机必崩) | **✅ 含 3 个 kernel 修复** |
-| 来源 | git 仓库提交 (8-4 上午, 端到端根因当时未确认) | **本机 site-packages 在跑版** |
+## VMFault 根因与修复 (核心, 必读)
 
-v1 在 git 历史里 (commit `5417311`) 自己承认"端到端根因仍未确认"。
-v2 = 本机后来演化出、实际在跑的精简版 (绕开整个 verify/ 子模块)。
+EAGLE3 是首个让 sparse **prefill** (verify 步) 进入 cuda graph 的场景。无 EAGLE3 时
+prefill=eager、decode=graph-safe, 所以这些 graph 问题之前从未暴露。cuda graph 的本质:
+**capture 时锁定所有张量的分配形状与地址, replay 时复用**。任何在 capture/replay 之间
+**形状变化**或**地址变化**的张量 → 越界 / 读垃圾 → KERNEL VMFault。
 
-## 改动的 6 个文件
+VMFault 有**两层根因**, 阶段1 的修复是必要但不充分的, 阶段2 才是真正根治。
 
-### A. EAGLE3 接口与 graph-safe 修复 (3 个)
+### 阶段1 — score buffer 第3维动态尺寸 (越界写)
+
+`prefill/flash_with_topk_idx.py` 里:
+```python
+max_seqblock_k = cdiv(max_seqlen_k, block_size_k)
+score = torch.full((num_heads, total_q, max_seqblock_k), -inf)   # 第3维依赖 max_seqlen_k
+# kernel 内:
+block_num = cdiv(seq_len, block_size_k)                          # 从真实 seq_lens 算
+tl.store(s_ptrs, val, boundary_check=(0,1))                      # 写 score[..., 0:block_num]
+```
+
+`max_seqlen_k` 来自 backend 的 `_max_seqlen_k`, 它在 capture/replay 之间变化:
+
+| 阶段 | `_max_seqlen_k` | score 第3维 | 结果 |
+|---|---|---|---|
+| **capture** | dummy `seq_lens=1` + draft(4) = 5 | `cdiv(5,128) = 1` | 被 graph 锁定 |
+| **replay** | 真实 `seq_lens ~2000` + 4 = 2004 | kernel `block_num = 16` | 写 `score[...,1..15]` 越界 |
+
+越界写破坏 score 之后的相邻张量 → garbage 输出; 越界足够远跨页时 ROCr 报
+`KERNEL VMFault: Invalid address access`。
+
+**修复 (阶段1)**: backend `__init__` 存恒定上界
+`max_seqblock_k_upper = cdiv(context_len + draft, block_size_k) = cdiv(204800+4, 128) = 1601`,
+经 `minimax_sparse.py:minimax_sparse_prefill` 透传, score 第3维用此恒定上界。
+capture/replay 形状恒定; kernel 内 `block_num` 仍从真实 `seq_lens` 算, `boundary_check`
+保护, 多余槽位填 `-inf` 不被读, causal 语义零变化。显存代价 ~0.09GB/卡, 可接受。
+
+### 阶段2 — cu_seqlens/seq_lens 临时张量地址漂移 (真正根因)
+
+阶段1 修复后**仍崩 VMFault**。加探针 (`EAGLE3_VERIFY_PROBE`) 记录 capture/replay 时
+传给 verify kernel 的所有张量 data_ptr, 发现:
+
+| 张量 | capture data_ptr | replay data_ptr | 稳定? |
+|---|---|---|---|
+| `cu_seqlens` | `0x7f3460200200` | `0x7f34c60ec400` | ❌ **变了** |
+| `seq_lens` | (变化) | (变化) | ❌ **变了** |
+| `q` | (变化) | (变化) | ❌ (但 q 是 sglang 既有 graph buffer, 见下表) |
+| `extend_seq_lens` | 稳定 | 稳定 | ✓ |
+| `prefix_lens` | 稳定 | 稳定 | ✓ |
+
+根因: 旧 `forward_extend` 用 `torch.cat([zeros, cumsum])` / `a + b` / `torch.full`
+**现场临时构造** `cu_seqlens` / `seq_lens` / `extend_seq_lens`。每次调用都 new 一块新内存
+→ **data_ptr 在 capture 与 replay 不同** → graph 锁了 capture 时的地址, replay 读到别处
+→ garbage / VMFault。`cu_seqlens` 内容是常量 `[0,D,2D,...,bs*D]`, 但因为每次重建, 地址
+还是漂。
+
+**修复 (阶段2, 真正根治)**: 新建专用 verify kernel 子模块 `verify/`
+(`minimax_sparse_verify_prefill`), 并在 backend 预分配 graph buffer:
+
+1. `init_cuda_graph_state`: 一次性预分配 3 个 graph buffer (地址锁死 backend 生命周期):
+   - `_verify_cu_seqlens_buf[max_bs+1]` (int32)
+   - `_verify_extend_seq_lens_buf[max_bs]` (int32)
+   - `_verify_seq_lens_buf[max_bs]` (int32)
+
+   (镜像 sglang triton backend 的 `qo_indptr` 模式: 一次性分配, 地址固定。)
+
+2. `init_forward_metadata_{capture,replay}_cuda_graph`: **写入同一块 buffer**
+   (capture/replay data_ptr 相同 → graph-safe):
+   - `cu_seqlens = arange(0, (bs+1)*D, D)` = `[0,D,2D,...,bs*D]` — 只依赖 `(bs,D)`, graph 内常量
+   - `extend_seq_lens = [D]*bs` — 只依赖 `(bs,D)`, graph 内常量
+   - `seq_lens = prefix + D` — 随真实 prefix 变 (kernel 运行时读, 这是正确的)
+
+3. `forward_extend`: `is_target_verify()` 路由到 `_forward_verify`, 用预分配 buffer;
+   `_max_seqlen_k = max_seqblock_k_upper * block_size_k` (恒定, 仅过 score 断言, 不参与分配)
+
+4. `_forward_verify` 有 `has_graph_buf` 分支: eager 路径 (`bs > cuda_graph_max_bs` 或
+   cuda graph 关闭) 无 buffer → 用 `torch.cat` 构造临时张量 (eager 不需要 graph-safety)
+
+### 传给 verify kernel 的数据分类 (为何只需固化 3 个 buffer)
+
+不是所有输入都要固化 —— 只固化「地址会变的临时张量」, 其余用既有稳定地址:
+
+| 类型 | 数据 | 是否固化 | 原因 |
+|---|---|---|---|
+| **graph buffer (新加)** | `cu_seqlens` / `seq_lens` | ✅ 固化 | 旧实现临时构造, 地址漂移 → vmfault 真因 |
+| sglang 既有 graph buffer | `q` / `idx_q` / `req_pool_indices` / `prefix_lens`(=seq_lens) | ❌ 本来稳定 | sglang `DecodeInputBuffers` 已预分配, 地址固定 |
+| paged cache 池 | `k_cache` / `v_cache` / `idx_k_cache` / `idx_v_cache` | ❌ 本来稳定 | 池地址固定, 内容随 slot 更新 |
+| 全局表 | `self.req_to_token` | ❌ 本来稳定 | 一次性分配 |
+| 静态标量 | `max_seqlen_q`(=D) / `max_seqblock_k_upper` / `block_size_k` / `topk_blocks`... | ❌ Python int | 编译期常量 |
+
+> 注: `prefix_lens = forward_batch.seq_lens.to(int32)`, 而 `seq_lens` buffer 是 int32
+> (`cuda_graph_runner.py` 确认), `.to(int32)` 是 no-op 返回 self, 地址稳定, graph-safe。
+
+### probe 如何定位根因
+
+`EAGLE3_VERIFY_PROBE=1` 环境变量开启探针, `_forward_verify` 每次 capture/replay 都把
+所有输入张量的 `data_ptr` / `shape` / `dtype` 写到 `/workspace/logs/eagle3_verify_probe.log`。
+对比 `[V CAPTURE]` 与 `[V REPLAY]` 行即可看出哪个张量地址漂了。正是这个探针确认了
+`cu_seqlens`/`seq_lens` 地址变化 (而非 score 上界) 才是阶段1 修复后仍崩的真正根因。
+
+---
+
+## 改动的 12 个文件
+
+### A. EAGLE3 target 侧接口 (1)
 
 | 文件 | site-packages 目标 | 作用 |
 |---|---|---|
 | `modified/minimax_m3_vl.py` | `sglang/srt/models/minimax_m3_vl.py` | VL 类补 EAGLE3 target 侧接口: `set_eagle3_layers_to_capture` / `get_embed_and_head` / `capture_aux_hidden_states` flag + aux-aware forward |
-| `modified/minimax_sparse_backend.py` | `sglang/srt/layers/attention/minimax_sparse_backend.py` | TARGET_VERIFY 字段 materialize (`extend_seq_lens=None→draft_token_num`) + K 长度=`prefix+draft` 重建 + graph-safe (capture/replay 用静态 `q.shape[0]`, 不 host sync) |
-| `modified/utils.py` | `sglang/srt/layers/attention/minimax_sparse_ops/common/utils.py` | `get_cu_seqblocks` graph-safe (`.sum().item()` host sync → capture 下静态上界 `batch*max_seqblock`) |
 
-### B. DCU/HIP + cuda-graph 兼容性修复 (3 个 sparse_ops kernel)
+### B. verify 路由 + graph buffer 根治 (1, 阶段2 核心)
+
+| 文件 | site-packages 目标 | 作用 |
+|---|---|---|
+| `modified/minimax_sparse_backend.py` | `…/layers/attention/minimax_sparse_backend.py` | TARGET_VERIFY 路由到 `_forward_verify`; `init_cuda_graph_state` 预分配 3 个 graph buffer; capture/replay 写同一 buffer (data_ptr 不变); `_max_seqlen_k` 取恒定上界; `has_graph_buf` eager 分支 |
+
+### C. 专用 verify kernel 子模块 (4, 阶段2 核心)
+
+| 文件 | site-packages 目标 | 作用 |
+|---|---|---|
+| `modified/verify/__init__.py` | `…/minimax_sparse_ops/verify/__init__.py` | export `minimax_sparse_verify_prefill` |
+| `modified/verify/verify_sparse.py` | `…/minimax_sparse_ops/verify/verify_sparse.py` | verify 入口 (step1 score 固定上界 + step3 OOB 双保险) |
+| `modified/verify/flash_with_topk_idx.py` | `…/minimax_sparse_ops/verify/flash_with_topk_idx.py` | verify step1 kernel, score 第3维用 `max_seqblock_k_upper` (恒定), grid 用 `max_seqlen_q`(=D=4, 恒定) |
+| `modified/verify/topk_sparse.py` | `…/minimax_sparse_ops/verify/topk_sparse.py` | verify step3 kernel (gqa share sparse, OOB 双保险) |
+
+### D. score 上界透传 (2, 阶段1 修复)
+
+| 文件 | site-packages 目标 | 作用 |
+|---|---|---|
+| `modified/minimax_sparse.py` | `…/minimax_sparse_ops/minimax_sparse.py` | `minimax_sparse_prefill` 透传 `max_seqblock_k_upper` 到 step1 (供普通 prefill 路径, verify 走专用 kernel) |
+| `modified/prefill_flash_with_topk_idx.py` | `…/minimax_sparse_ops/prefill/flash_with_topk_idx.py` | score 第3维从动态 `cdiv(max_seqlen_k,bsk)` 改用恒定上界 `max_seqblock_k_upper` (capture/replay 形状恒定) |
+
+### E. graph-safe 辅助 (1)
+
+| 文件 | site-packages 目标 | 作用 |
+|---|---|---|
+| `modified/utils.py` | `…/minimax_sparse_ops/common/utils.py` | `get_cu_seqblocks` graph-safe (`.sum().item()` host sync → capture 下静态上界 `batch*max_seqblock`) |
+
+### F. DCU/HIP + cuda-graph 兼容性 (3)
 
 这 3 个是 EAGLE3 让 sparse **prefill** 首次进入 cuda graph 后才暴露的 DCU 兼容问题。
 **不加这 3 个, 别机必崩** (本机因已 in-place 改过 site-packages 才不崩):
@@ -40,60 +156,25 @@ v2 = 本机后来演化出、实际在跑的精简版 (绕开整个 verify/ 子�
 | 文件 | site-packages 目标 | 作用 |
 |---|---|---|
 | `modified/prefill_topk_sparse.py` | `…/minimax_sparse_ops/prefill/topk_sparse.py` | DCU 64KB shared-mem 限制 → `_PREFILL_NUM_STAGES=[1] if is_hip() else [2,3]`。原版写死 `num_stages=2,3` (~68KB) 超 65536 → prefill 崩 `OutOfResources: shared memory 69632 > 65536` |
-| `modified/decode_topk_sparse.py` | `…/minimax_sparse_ops/decode/topk_sparse.py` | 同上, decode kernel `_NUM_STAGES=[1] if is_hip() else [2,3,4,5]`, decode 路径同样会超 shared-mem |
-| `modified/decode_flash_with_topk_idx.py` | `…/minimax_sparse_ops/decode/flash_with_topk_idx.py` | cuda-graph capture 期间禁用 side_stream fork (`torch.cuda.is_stream_capturing()` → `side_stream=None`)。原版无条件 `torch.cuda.Stream()` fork 新 stream, capture 期间非法 → 多 batch cuda graph 崩 |
+| `modified/decode_topk_sparse.py` | `…/minimax_sparse_ops/decode/topk_sparse.py` | 同上, decode kernel `_NUM_STAGES=[1] if is_hip() else [2,3,4,5]` |
+| `modified/decode_flash_with_topk_idx.py` | `…/minimax_sparse_ops/decode/flash_with_topk_idx.py` | cuda-graph capture 期间禁用 side_stream fork (`is_stream_capturing()` → `side_stream=None`)。原版无条件 fork 新 stream, capture 期间非法 → 多 batch cuda graph 崩 |
 
-每个文件同时附 `.patch` (基于 sglang 干净原版的 unified diff), 供审计/手工 apply。
-
-> ⚠ **为何之前别机装了 v2 仍崩**: 早期 v2 只含 A 组 3 个文件, B 组 3 个 kernel 是本机直接改
-> site-packages 的, 一直没进 patch 体系。别机装完 v2 后这 3 个 kernel 仍是原版 →
-> prefill/decode 超 shared-mem 崩 + cuda-graph fork stream 崩。本版补齐 B 组后根治。
-
-## VMFault 修复 (两层, 本版均已根治)
-
-EAGLE3 是首个让 sparse **prefill** 进入 cuda graph 的场景 (无 EAGLE3 时
-prefill=eager, decode=graph-safe)。两层问题:
-
-1. **score buffer 动态尺寸** — prefill 的 `score`/`topk` 按 `cdiv(max_seqlen_k, block_size_k)`
-   动态分配, capture (dummy `seq_lens=1`) 与 replay (真实 ~2000) 尺寸不一致 → 越界写。
-   **修复**: `utils.py get_cu_seqblocks` 在 `is_current_stream_capturing()` 下用静态上界
-   `batch_size * max_seqblock`, 张量形状 capture/replay 恒定; kernel 内部仍按真实 seq_len 索引。
-
-2. **forward_extend 临时 tensor** (bs≥并发阈值才崩的真正根因) — 旧版用临时 `extend_seq_lens`
-   (`forward_extend` 里 `torch.full` 新建) 算 cu_seqlens。capture 的 `forward_batch` 是局部变量,
-   捕获后被 GC, `extend_seq_lens` 内存释放/复用; replay 读老地址 → 垃圾 → 越界。
-   bs=1 碰巧不炸, bs=16 必崩。
-   **修复**: verify 分支 materialize `extend_seq_lens = draft_token_num` (固定形状, graph-safe),
-   K 长度重建为 `prefix + draft` (`raw_seq_lens + extend_seq_lens`),
-   `prefix_lens` 用 `forward_batch.seq_lens` **graph buffer 引用** (地址稳定, replay 时是真实值),
-   不用 capture 时物化的 `extend_prefix_lens` (会过期)。
+---
 
 ## 用法
 
 ```bash
-# 安装 (自动备份原版 → 覆盖 → 清 triton 缓存 → 验证)
+# 安装 (自动备份原版 → 覆盖 12 文件 → 清 triton 缓存 → 验证)
 bash sglang_patches/eagle3-v2/install.sh
 
-# 仅检查是否已安装 v2
+# 仅检查是否已安装 v2 (8 既有 + 4 verify + 5 graph buffer 标记)
 bash sglang_patches/eagle3-v2/install.sh --check
 
-# 回滚 (从备份恢复干净原版)
+# 回滚 (从备份恢复 8 既有文件 + 删除 verify/ 子模块)
 bash sglang_patches/eagle3-v2/install.sh --rollback
 
 # 安装后启动 EAGLE3 服务 (端口 8082)
 bash sglang_patches/eagle3-v2/start_eagle3.sh
-```
-
-### 从 v1 切到 v2
-
-若容器之前装过 v1 (会残留 `verify/` 目录 + `seqlens_expand_triton` 标记):
-
-```bash
-bash sglang_patches/eagle3/install.sh --rollback   # 先回滚 v1
-# 可选: 删 v1 新增的 verify/ 目录
-rm -rf /usr/local/lib/python3.10/dist-packages/sglang/srt/layers/attention/minimax_sparse_ops/verify
-bash sglang_patches/eagle3-v2/install.sh           # 再装 v2
-bash sglang_patches/eagle3-v2/install.sh --check   # 确认无 v1 残留
 ```
 
 ## 前置条件 (目标容器)
@@ -109,72 +190,59 @@ bash sglang_patches/eagle3-v2/install.sh --check   # 确认无 v1 残留
 ```
 eagle3-v2/
 ├── README.md                              # 本文件
-├── install.sh                             # 一键安装/检查/回滚
+├── install.sh                             # 一键安装/检查/回滚 (12 文件)
 ├── start_eagle3.sh                        # 启动 EAGLE3 sglang 服务 (端口 8082)
-├── modified/
-│   ├── minimax_m3_vl.py                   # 在跑版 (完整文件)
-│   ├── minimax_m3_vl.py.patch             # unified diff (原版→在跑版)
-│   ├── minimax_sparse_backend.py
-│   ├── minimax_sparse_backend.py.patch
-│   ├── utils.py
-│   ├── utils.py.patch
+├── modified/                              # 12 个 patch 文件 (整文件覆盖)
+│   ├── minimax_m3_vl.py                   # EAGLE3 target 侧接口
+│   ├── minimax_sparse_backend.py          # verify 路由 + graph buffer 根治 (阶段2)
+│   ├── utils.py                           # get_cu_seqblocks graph-safe
+│   ├── minimax_sparse.py                  # 透传 max_seqblock_k_upper (阶段1)
+│   ├── prefill_flash_with_topk_idx.py     # score 第3维恒定上界 (阶段1)
 │   ├── prefill_topk_sparse.py             # DCU shared-mem 修复
-│   ├── prefill_topk_sparse.py.patch
 │   ├── decode_topk_sparse.py              # DCU shared-mem 修复
-│   ├── decode_topk_sparse.py.patch
 │   ├── decode_flash_with_topk_idx.py      # cuda-graph side_stream 修复
-│   └── decode_flash_with_topk_idx.py.patch
-└── docs/
-    └── (可放验证记录)
+│   └── verify/                            # 专用 verify kernel 子模块 (阶段2)
+│       ├── __init__.py
+│       ├── verify_sparse.py
+│       ├── flash_with_topk_idx.py
+│       └── topk_sparse.py
+└── tests/                                 # VMFault 根治测试 (见 tests/README.md)
+    ├── README.md                          # 测试说明 + 运行顺序
+    ├── test_vmfault_score_upper_bound.py  # 阶段1: score 形状一致性回归 (纯CPU, 秒级)
+    ├── test_vmfault_graph_repro.py        # 阶段1: 真越界写复现 (需GPU, cuda graph)
+    └── test_verify_graph_buffers.py       # 阶段2: graph buffer 逻辑单元测试 (纯CPU, 8 组)
 ```
 
 ## 验证 EAGLE3 是否生效
 
 启动后看日志:
-- `[EAGLE3]` / `speculative` 相关行, accept rate ~0.7-0.8
-- 吞吐: 纯 W4A16 eager ~5 tok/s → EAGLE3 + cuda graph 16-22 tok/s
+- `[EAGLE3]` / `speculative` 相关行, accept rate ~0.59 (并发 8 实测), accept len ~2.78
+- 吞吐: 纯 W4A16 eager ~5 tok/s → EAGLE3 + cuda graph 显著提升
 - 输出正确: 对话/代码不乱码不复读
+- **无 `KERNEL VMFault` / `Invalid address access` / `SIGSEGV`** (并发 8 × 1000 tokens 压测通过)
+
+## 排查指南
 
 若崩 VMFault:
-- 确认 `--check` 全 ✓ 且无 v1 残留 (尤其 6 个文件标记都要 ✓)
-- `start_eagle3.sh` 里 `EAGLE3_VERIFY_PROBE=1` 已开, 看 `/workspace/logs/eagle3_verify_probe.log`
-- 确认 sglang 版本一致 (版本不一致是 patch apply 后行为异常的最常见原因)
+1. 跑 `install.sh --check` 确认 12 文件标记全 ✓ (尤其 5 个 graph buffer 标记 + 4 个 verify 标记)
+2. **先跑离线测试** (不起服务, 见 `tests/README.md`):
+   ```bash
+   cd sglang_patches/eagle3-v2/tests
+   python test_vmfault_score_upper_bound.py   # 阶段1: 形状一致性 (纯CPU, 秒级)
+   python test_verify_graph_buffers.py        # 阶段2: graph buffer 逻辑 (纯CPU, 8 组)
+   python test_vmfault_graph_repro.py         # 阶段1: 真越界复现 (需GPU, ~10秒)
+   ```
+3. 若需复现探针定位: `export EAGLE3_VERIFY_PROBE=1` 后重启, 看
+   `/workspace/logs/eagle3_verify_probe.log` 里 `[V CAPTURE]` vs `[V REPLAY]` 的
+   `cu_seqlens(buf)` / `seq_lens(buf)` data_ptr 是否相同 (相同 = 阶段2 修复生效)
+4. 确认 sglang 版本一致 (版本不一致是 patch apply 后行为异常的最常见原因)
 
 若崩 `OutOfResources: shared memory 69632 > 65536`:
-- 这是 DCU 64KB shared-mem 限制, 说明 `prefill_topk_sparse.py` / `decode_topk_sparse.py`
-  的 `_NUM_STAGES` 修复没生效 → 跑 `install.sh --check` 确认这 2 个标记 ✓
+- DCU 64KB shared-mem 限制, 说明 `prefill_topk_sparse.py` / `decode_topk_sparse.py` 的
+  `_NUM_STAGES` 修复没生效 → 跑 `install.sh --check` 确认这 2 个标记 ✓
 - 同时确认 `python3 -c "import torch; print(torch.version.hip)"` 非 None
   (is_hip()=False 时 num_stages 仍会选 2,3 — 那是 PyTorch 装错成 CUDA 版, 不是 patch 问题)
 
 若多 batch cuda graph 崩 (stream capture 相关):
 - 说明 `decode_flash_with_topk_idx.py` 的 `is_stream_capturing` 修复没生效
   → 跑 `install.sh --check` 确认该标记 ✓
-
-## 与 v1 (`eagle3/`) 残留共存说明
-
-v2 **完全不引用** v1 的 `verify/` 子模块 (v2 的 verify 路径走标准 `minimax_sparse_prefill`,
-不依赖 `verify_sparse`)。已验证:
-
-- v2 的 3 个文件零 `verify_sparse` / `minimax_sparse_ops.verify` 引用
-- 全 sglang 代码只有 v1 自己的 sparse_backend import 过 verify (装 v2 后被覆盖, 该 import 消失)
-- `minimax_sparse_ops/__init__.py` 不自动加载 verify 子包 → 残留的 verify/ 是"孤儿", 无人触发
-
-因此 **v1 残留的 `verify/` 目录对 v2 执行零影响**, 三种场景:
-
-| 场景 | 结果 |
-|---|---|
-| 全新机器 (没装过 v1) | 最干净, 无 verify/ 目录, 直接装 v2 |
-| 装过 v1 直接装 v2 | v1 sparse_backend 被覆盖, verify/ 成孤儿残留, **v2 照常运行** (~40KB 占磁盘, 无害) |
-| 装过 v1 先回滚再装 v2 | v1 `--rollback` 会删 verify/, 然后装 v2, 纯净 |
-
-**v2 install.sh 有意不删 v1 的 verify/ 残留** (只管自己改的 3 个文件, 不碰别人的东西)。
-若想彻底清理残留:
-
-```bash
-# 方式1: 先回滚 v1 (会删 verify/), 再装 v2
-bash sglang_patches/eagle3/install.sh --rollback
-bash sglang_patches/eagle3-v2/install.sh
-
-# 方式2: 手动删孤儿目录
-rm -rf /usr/local/lib/python3.10/dist-packages/sglang/srt/layers/attention/minimax_sparse_ops/verify
-```

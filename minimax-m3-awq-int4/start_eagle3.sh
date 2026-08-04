@@ -104,7 +104,7 @@ echo "Using --mem-fraction-static ${MEM_FRAC} --cuda-graph-max-bs ${CUDA_GRAPH_B
 exec sglang serve \
     --model-path /models/MiniMax-M3-AWQ-INT4 \
     --speculative-algorithm EAGLE3 \
-    --speculative-draft-model-path /models/Inferact/MiniMax-M3-EAGLE3 \
+    --speculative-draft-model-path /models/MiniMax-M3-EAGLE3 \
     --speculative-num-steps 3 \
     --speculative-eagle-topk 1 \
     --speculative-attention-mode prefill \
