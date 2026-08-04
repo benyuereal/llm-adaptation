@@ -62,6 +62,16 @@ export OMP_NUM_THREADS="${OMP_NUM_THREADS:-8}"
 # DTK 2604 不支持 expandable_segments;EAGLE3 verify 路径显存更碎,用 gc 阈值控制
 export PYTORCH_HIP_ALLOC_CONF="garbage_collection_threshold:0.8"
 
+# 性能旋钮: 收紧 sparse score buffer 上界 (graph-safe, 不改 --context-length)。
+# verify kernel 每 layer 每 verify 都分配 score[num_heads, total_q, max_seqblock_k_upper],
+# 默认 max_seqblock_k_upper = cdiv(context_len+D, 128) = cdiv(204804,128) = 1601。
+# 但真实请求远短于 20万 token (实测 ~千级), score 按 1601 分配但只填前 ~10 维 →
+# 57 层 × 每 verify 的 alloc + -inf init 开销浪费。设此值为你的真实单请求最大 KV 长度,
+# 上界按 min(context_len, 此值) 取, score 分配量同比例下降。设太小会 fail-fast 报错
+# (不会静默 VMFault)。例: 真实最长请求 ~3万 token → 设 32768, 上界 257 (降 6 倍)。
+# 默认不设 (=0) = 用完整 context_len, 行为不变。
+# export MINIMAX_SPARSE_MAX_KV_LEN=32768
+
 # 清 Triton/torchinductor 缓存（改过 kernel 后必须清,否则用旧编译结果）
 export TORCHINDUCTOR_CACHE_DIR=/models/.torchinductor_cache
 export TMPDIR=/models/tmp
