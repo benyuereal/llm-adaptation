@@ -20,9 +20,6 @@ from sglang.srt.layers.attention.minimax_sparse_ops.minimax_sparse import (
     minimax_sparse_decode,
     minimax_sparse_prefill,
 )
-from sglang.srt.layers.attention.minimax_sparse_ops.verify.verify_sparse import (
-    minimax_sparse_verify_prefill,
-)
 from sglang.srt.mem_cache.memory_pool import MiniMaxSparseKVPool
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 
@@ -136,18 +133,6 @@ class MiniMaxSparseAttnBackend(AttentionBackend):
         # extra memory is ~0.5MB/layer for verify's small total_q, and the
         # kernel only loops over real valid_blocks (no compute waste).
         self._max_seqlen_k_upper = int(runner.model_config.context_len)
-
-        # EAGLE3 verify: draft token count per request (D). Fixed Python int,
-        # graph-safe. Used in forward_extend's target_verify branch to build
-        # cu_seqlens / seq_lens WITHOUT depending on the temporary
-        # `forward_batch.extend_seq_lens` tensor (which is None for verify and
-        # would be newly allocated each forward_extend call — under cuda graph
-        # capture that temp tensor is GC'd after capture, so replay would read
-        # a stale/freed address → garbage → VMFault. See forward_extend verify
-        # branch for the graph-safe reconstruction using this + forward_batch.seq_lens).
-        self.num_draft_tokens = int(
-            getattr(runner.server_args, "speculative_num_draft_tokens", None) or 4
-        )
 
         self.block_size_q = 1
         self.block_size_k = sparse_cfg["sparse_block_size"]
@@ -619,21 +604,61 @@ class MiniMaxSparseAttnBackend(AttentionBackend):
         idx_k: torch.Tensor,
         idx_v: Optional[torch.Tensor],
     ):
-        # EAGLE3 Strategy B: route target_verify through the NEW graph-safe
-        # verify_prefill kernel (minimax_sparse_verify_prefill) instead of the
-        # crashing prefill path. Strategy A (verify->decode kernel) is abandoned
-        # — it broke dialogue output because the decode kernel uses heuristic
-        # init_blocks/local_blocks block selection instead of prefill's strict
-        # causal mask (off_q >= pos_k). Strategy B preserves prefill's EXACT
-        # causal semantics; only the score buffer SIZE changes (fixed upper
-        # bound max_seqblock_k_upper = cdiv(context_len, block_size_k)) so
-        # capture/replay shapes are identical (graph-safe). The actual kernel
-        # call selection (verify_prefill vs original prefill) happens at the
-        # bottom of this method; here we just no longer short-circuit to the
-        # decode kernel. _forward_verify_via_decode / _verify_decode_mode are
-        # kept (unused) for reference / easy rollback.
+        # EAGLE3 Strategy A: route target_verify through the graph-safe DECODE
+        # kernel when speculative_attention_mode == "decode". This avoids the
+        # prefill sparse kernel's VMFault under cuda graph (its score/topk
+        # tensors are sized by a dynamic max_seqlen_k that differs between
+        # capture and replay). The decode kernel is graph-safe (score sized by
+        # the static req_to_token.shape[1]). Falls through to the existing
+        # prefill path for mode == "prefill" (kept as a fallback) or for any
+        # non-verify extend.
+        if forward_batch.forward_mode.is_target_verify():
+            if self._verify_decode_mode() == "decode":
+                return self._forward_verify_via_decode(
+                    q, k, v, layer, forward_batch, save_kv_cache,
+                    idx_q=idx_q, idx_k=idx_k, idx_v=idx_v,
+                )
+            # else: mode == "prefill" -> fall through to the existing prefill
+            # path below (the crashing-under-graph one, kept as fallback).
 
         disable_value = layer.layer_id in self.disable_value_layer_ids
+
+        # EAGLE3 TARGET_VERIFY: extend_seq_lens may be None here.
+        # - eager: init_forward_metadata already materialised it.
+        # - cuda graph capture/replay: init_forward_metadata_capture_cuda_graph
+        #   does NOT set it (the captured ForwardBatch leaves it None), so the
+        #   cu_seqlens build below would crash on `.device`. Materialise it here
+        #   from spec_info.draft_token_num with a fixed shape (graph-safe: no
+        #   host sync, no dynamic shape). Uniform draft_token_num per request.
+        if forward_batch.extend_seq_lens is None:
+            spec_info = getattr(forward_batch, "spec_info", None)
+            draft_token_num = getattr(spec_info, "draft_token_num", None)
+            num_reqs = forward_batch.seq_lens.shape[0]
+            if draft_token_num is None:
+                draft_token_num = (
+                    forward_batch.input_ids.shape[0] // max(num_reqs, 1)
+                )
+            forward_batch.extend_seq_lens = torch.full(
+                (num_reqs,), int(draft_token_num),
+                dtype=torch.int32, device=forward_batch.seq_lens.device,
+            )
+            # _cpu list fields use no host sync to build, but only set them
+            # outside graph capture (forward_extend only needs the tensors;
+            # the _cpu lists are consumed by init_forward_metadata in eager).
+            if not torch.cuda.is_current_stream_capturing():
+                if forward_batch.extend_seq_lens_cpu is None:
+                    forward_batch.extend_seq_lens_cpu = [int(draft_token_num)] * num_reqs
+                if forward_batch.extend_prefix_lens is None:
+                    # verify: seq_lens is the prefix (scheduler adds accept_lens later)
+                    forward_batch.extend_prefix_lens = forward_batch.seq_lens.to(torch.int32)
+                    forward_batch.extend_prefix_lens_cpu = (
+                        forward_batch.extend_prefix_lens.cpu().tolist()
+                    )
+            else:
+                # Under graph capture: only materialise the tensors (graph-safe,
+                # fixed shape). _cpu lists are not needed in the captured path.
+                if forward_batch.extend_prefix_lens is None:
+                    forward_batch.extend_prefix_lens = forward_batch.seq_lens.to(torch.int32)
 
         # ---- 探针 B: capture 时记录 out_cache_loc 静态属性 ----
         # NOTE: forward_extend 在 replay 时不执行 Python(被 graph 跳过), 此探针仅 capture 时生效.
@@ -676,72 +701,33 @@ class MiniMaxSparseAttnBackend(AttentionBackend):
                 layer.layer_id
             )
 
-        # ---- cu_seqlens / seq_lens / prefix_lens 构建 ----
-        # 【graph-safety 关键】EAGLE3 target_verify 进 cuda graph (capture_forward_mode
-        # =TARGET_VERIFY). forward_extend 的 Python 在 replay 时被 graph 跳过, 所以
-        # 这里构建的 tensor 的 *地址* 会被 graph 记录, replay 时必须仍有效.
-        #
-        # 旧实现 (已废弃): 用 forward_batch.extend_seq_lens 临时 tensor 算
-        #   cu_seqlens = torch.cat([zeros, extend_seq_lens.cumsum(0)])
-        #   seq_lens = raw_seq_lens + extend_seq_lens
-        # 但 verify 时 ForwardBatch.init_new (forward_batch_info.py:561 is_target_verify
-        # 分支) **不设 extend_seq_lens** (保持 None), 旧代码在 forward_extend 里
-        # torch.full 临时新建它. 这个临时 tensor 在 capture 的 forward_batch (局部变量,
-        # cuda_graph_runner.py:1072) 被 GC 后内存释放/复用, replay 时 graph 读老地址
-        # → 垃圾 → 越界 → VMFault (bs=1 碰巧不炸, bs>=并发阈值必崩).
-        #
-        # 新实现 (graph-safe): verify 完全不依赖 extend_seq_lens, 改用
-        #   1. forward_batch.seq_lens  (graph buffer, replay_prepare 填充, 地址稳定)
-        #   2. self.num_draft_tokens D (Python int 常量, graph-safe)
-        #   3. torch.arange(0, (bs+1)*D, D)  (Python int 输入, 同 triton backend 的
-        #      qo_indptr, sglang 标准的 graph-safe 模式)
-        # verify 时 forward_batch.seq_lens = prefix (prepare_for_v2_verify 不加 D),
-        # 故 prefix_lens=seq_lens, seq_lens=seq_lens+D, cu_seqlens=[0,D,2D,...,bs*D].
+        cu_seqlens = torch.cat(
+            [
+                torch.zeros(
+                    1, dtype=torch.int32, device=forward_batch.extend_seq_lens.device
+                ),
+                forward_batch.extend_seq_lens.to(torch.int32).cumsum(0).to(torch.int32),
+            ]
+        )
+        # Kernel expects seq_lens = prefix + extend. For normal prefill,
+        # forward_batch.seq_lens already is prefix+extend. For EAGLE3
+        # TARGET_VERIFY, prepare_for_v2_verify leaves seq_lens as the prefix
+        # (the scheduler adds accept_lens after verify), so rebuild it as
+        # prefix + extend here.
         raw_seq_lens = forward_batch.seq_lens.to(torch.int32)
-        is_verify = forward_batch.forward_mode.is_target_verify()
-        if is_verify:
-            D = self.num_draft_tokens
-            bs = raw_seq_lens.shape[0]
-            device = raw_seq_lens.device
-            # cu_seqlens = [0, D, 2D, ..., bs*D]. 输入全是 Python int (bs 是 capture
-            # 固定值, D 是常量), 输出内容确定 → graph-safe (同 triton_backend.py:363
-            # qo_indptr = torch.arange 的标准模式).
-            cu_seqlens = torch.arange(
-                0, (bs + 1) * D, step=D, dtype=torch.int32, device=device
-            )
-            # prefix_lens = forward_batch.seq_lens (graph buffer, 地址稳定).
-            # raw_seq_lens 是 .to(int32) no-op (seq_lens 已是 int32), 同地址.
+        if forward_batch.forward_mode.is_target_verify():
+            # EAGLE3 verify: seq_lens is the PREFIX (scheduler adds accept_lens
+            # after). Use raw_seq_lens directly as prefix_lens — it is a buffer
+            # reference that holds the REAL per-request prefix at replay time.
+            # Do NOT use forward_batch.extend_prefix_lens: under cuda graph it
+            # was materialised once at capture time with a fixed value and is
+            # not updated on replay, so it would be stale and garble output.
             prefix_lens = raw_seq_lens
-            # seq_lens = prefix + D. raw_seq_lens 是 graph buffer, + Python int D
-            # 是 graph-safe (输入地址稳定, 输出是 graph 内部静态内存, 内容随 replay
-            # 的 raw_seq_lens 值正确更新).
-            seq_lens = raw_seq_lens + D
-        elif forward_batch.extend_seq_lens is not None:
-            # normal extend: extend_seq_lens 由 init_new 设为真实 tensor (eager, 非
-            # graph 路径, 地址本次 forward 存活). 用原 prefill 的 cat 逻辑.
-            cu_seqlens = torch.cat(
-                [
-                    torch.zeros(
-                        1, dtype=torch.int32, device=forward_batch.extend_seq_lens.device
-                    ),
-                    forward_batch.extend_seq_lens.to(torch.int32).cumsum(0).to(torch.int32),
-                ]
-            )
-            raw_seq_lens = forward_batch.seq_lens.to(torch.int32)
-            if forward_batch.extend_prefix_lens is not None:
-                prefix_lens = forward_batch.extend_prefix_lens.to(torch.int32)
-                seq_lens = raw_seq_lens  # normal extend: already prefix + extend
-            else:
-                prefix_lens = torch.zeros_like(raw_seq_lens)
-                seq_lens = raw_seq_lens
+            seq_lens = raw_seq_lens + forward_batch.extend_seq_lens.to(torch.int32)
+        elif forward_batch.extend_prefix_lens is not None:
+            prefix_lens = forward_batch.extend_prefix_lens.to(torch.int32)
+            seq_lens = raw_seq_lens  # normal extend: already prefix + extend
         else:
-            # fallback: 无 extend_seq_lens (不应发生于 verify/extend, 兜底).
-            cu_seqlens = torch.cat(
-                [
-                    torch.zeros(1, dtype=torch.int32, device=raw_seq_lens.device),
-                    raw_seq_lens.cumsum(0).to(torch.int32),
-                ]
-            )
             prefix_lens = torch.zeros_like(raw_seq_lens)
             seq_lens = raw_seq_lens
 
@@ -862,99 +848,30 @@ class MiniMaxSparseAttnBackend(AttentionBackend):
             except Exception as _e:
                 _probe_log(f"[E EAGER] probe-err layer={layer.layer_id}: {_e}")
 
-        # EAGLE3 Strategy B: target_verify uses the NEW graph-safe verify_prefill
-        # kernel (fixed-size score buffer). Normal extend keeps the original
-        # prefill kernel unchanged. The verify kernel takes max_seqblock_k_upper
-        # (Python int = cdiv(context_len, block_size_k)) so its score buffer is a
-        # FIXED size across capture/replay → graph-safe. The kernel still loops
-        # over the real seq_lens for causal masking (no compute waste). For
-        # verify, self._max_seqlen_k is already set to self._max_seqlen_k_upper
-        # by init_forward_metadata_capture/replay (scheme C) — keep passing it
-        # for consistency; it is only a hint (the kernel uses the seq_lens
-        # tensor for causal and max_seqblock_k_upper for the buffer size).
-        if forward_batch.forward_mode.is_target_verify():
-            max_seqblock_k_upper = (
-                self._max_seqlen_k_upper + self.block_size_k - 1
-            ) // self.block_size_k
-            # ---- 精细探针 F: verify kernel 调用前, 捕获所有输入 shape/ptr/值 ----
-            # 目的: 定位 bs=16 graph replay 崩溃. capture 时打 (replay 时 Python 跳过).
-            if (_VERIFY_PROBE and _VERIFY_PROBE_RANK == 0
-                    and torch.cuda.is_current_stream_capturing()):
-                try:
-                    _bs = seq_lens.shape[0]
-                    _probe_log(f"[F CAPTURE] layer={layer.layer_id} bs={_bs} "
-                               f"max_seqlen_q={self._max_seqlen_q} max_seqlen_k={self._max_seqlen_k} "
-                               f"max_seqblock_k_upper={max_seqblock_k_upper}")
-                    _probe_log(f"  q: shape={tuple(q.shape)} ptr={q.data_ptr()} contig={q.is_contiguous()}")
-                    _probe_log(f"  idx_q: shape={tuple(idx_q.shape)} ptr={idx_q.data_ptr()}")
-                    _probe_log(f"  k_cache: shape={tuple(k_cache.shape)} ptr={k_cache.data_ptr()}")
-                    _probe_log(f"  idx_k_cache: shape={tuple(idx_k_cache.shape)}")
-                    if idx_v_cache is not None:
-                        _probe_log(f"  idx_v_cache: shape={tuple(idx_v_cache.shape)}")
-                    _probe_log(f"  cu_seqlens: shape={tuple(cu_seqlens.shape)} ptr={cu_seqlens.data_ptr()} "
-                               f"dtype={cu_seqlens.dtype}")
-                    _probe_log(f"  seq_lens: shape={tuple(seq_lens.shape)} ptr={seq_lens.data_ptr()}")
-                    _probe_log(f"  prefix_lens: shape={tuple(prefix_lens.shape)} ptr={prefix_lens.data_ptr()}")
-                    _probe_log(f"  req_pool_indices: shape={tuple(forward_batch.req_pool_indices.shape)} "
-                               f"ptr={forward_batch.req_pool_indices.data_ptr()}")
-                    _probe_log(f"  req_to_token: shape={tuple(self.req_to_token.shape)} ptr={self.req_to_token.data_ptr()}")
-                    _probe_log(f"  out_cache_loc: shape={tuple(forward_batch.out_cache_loc.shape)} "
-                               f"ptr={forward_batch.out_cache_loc.data_ptr()}")
-                    # capture 时是 dummy 值, 但 shape 是关键
-                    _probe_log(f"  [F] capture bs={_bs}: cu_seqlens shape={tuple(cu_seqlens.shape)} "
-                               f"(应=[bs+1]), seq_lens shape={tuple(seq_lens.shape)} (应=[bs])")
-                except Exception as _e:
-                    _probe_log(f"[F CAPTURE] probe-err: {_e}")
-            idx_o, o = minimax_sparse_verify_prefill(
-                q,
-                k_cache,
-                v_cache,
-                None,
-                idx_q,
-                idx_k_cache,
-                idx_v_cache,
-                None,
-                self.req_to_token,
-                forward_batch.req_pool_indices,
-                cu_seqlens,
-                seq_lens,
-                prefix_lens,
-                self._max_seqlen_q,
-                self._max_seqlen_k,
-                max_seqblock_k_upper,
-                self.block_size_q,
-                self.block_size_k,
-                self.topk_blocks,
-                self.init_blocks,
-                self.local_blocks,
-                score_type=self.score_type,
-                disable_index_value=disable_value,
-            )
-        else:
-            idx_o, o = minimax_sparse_prefill(
-                q,
-                k_cache,
-                v_cache,
-                None,
-                idx_q,
-                idx_k_cache,
-                idx_v_cache,
-                None,
-                self.req_to_token,
-                forward_batch.req_pool_indices,
-                cu_seqlens,
-                seq_lens,
-                prefix_lens,
-                self._max_seqlen_q,
-                self._max_seqlen_k,
-                self.block_size_q,
-                self.block_size_k,
-                self.topk_blocks,
-                self.init_blocks,
-                self.local_blocks,
-                score_type=self.score_type,
-                disable_index_value=disable_value,
-            )
+        idx_o, o = minimax_sparse_prefill(
+            q,
+            k_cache,
+            v_cache,
+            None,
+            idx_q,
+            idx_k_cache,
+            idx_v_cache,
+            None,
+            self.req_to_token,
+            forward_batch.req_pool_indices,
+            cu_seqlens,
+            seq_lens,
+            prefix_lens,
+            self._max_seqlen_q,
+            self._max_seqlen_k,
+            self.block_size_q,
+            self.block_size_k,
+            self.topk_blocks,
+            self.init_blocks,
+            self.local_blocks,
+            score_type=self.score_type,
+            disable_index_value=disable_value,
+        )
         # ---- 探针 C: capture 时记录传给 kernel 的张量 shape(用于和 replay 对比)----
         # NOTE: forward_extend 在 replay 时不执行 Python, 此探针仅 capture 时生效.
         # capture 时 seq_lens=[1,1,..](dummy), 这里记录 shape/ptr; replay 真实值由探针 A 检查.

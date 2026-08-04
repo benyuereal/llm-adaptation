@@ -107,7 +107,7 @@ exec sglang serve \
     --speculative-draft-model-path /models/Inferact/MiniMax-M3-EAGLE3 \
     --speculative-num-steps 3 \
     --speculative-eagle-topk 1 \
-    --speculative-attention-mode decode \
+    --speculative-attention-mode prefill \
     --mem-fraction-static "$MEM_FRAC" \
     --context-length "$CONTEXT_LEN" \
     --tp 8 \

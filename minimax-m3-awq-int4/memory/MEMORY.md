@@ -1,0 +1,14 @@
+
+- [M3 trace instrumentation](m3-trace-instrumentation.md) — 逐层/算子埋点定位非确定性,已装并重启
+- [M3 precision non-determinism](m3-precision-nondeterminism.md) — temp=0 下 HumanEval/26 输出不一致的铁证与根因怀疑
+- [M3 trace findings](m3-trace-findings.md) — prefill确定,非确定性来自并发/cuda-graph而非量化
+- [HumanEval det eval result](humaneval-det-eval-result.md) — 确定配置71.34% vs v3 79.27%,差距主因是长生成截断
+- [HumanEval/10 强思考校准靶心](humaneval10-strong-thinking-calibration.md) — 换容器先复现此题,thinking_mode=enabled+max_tokens=32768+强制trace三要素
+- [M3 lightning indexer 修复](m3-lightning-indexer-fix.md) — "流畅但不聪明"根因:indexer权重未加载,已用layer_types修复,精度回升吞吐降半
+- [M3 indexer v/o_proj Bug B](m3-indexer-voproj-bug.md) — Bug A叠加的第二个bug:index_v/o_proj假支路,disable恒False,待修
+- [M3 性能:吞吐降半+卡顿](m3-perf-disk-full.md) — sparse生效致8并发decode 56→28 tok/s;4分钟卡顿待查;磁盘已清理够用不再追
+- [llm-adaptation push 流程](llm-adaptation-push-workflow.md) — 修复代码进仓库后必须commit+push到GitHub(ssh已通,benyuereal)
+- [M3 RoPE base 排查](m3-rope-base-rootcause.md) — 已排除:主路径RoPE base=5000000正确,假阳性源于实验sys.path污染;真实脆弱点是sglang缺vllm的patch_rope_parameters
+- [M3 MoE routed_scaling_factor bug](m3-moe-scaling-shared-rootcause.md) — 静态证据链完整:minimax_m3.py没把2.0传给experts runner,topk和combine都没乘,2.0丢失;shared/激活已排除非bug;待重启运行时验证
+- [M3 sglang verify VMFault rootcause](m3-sglang-verify-vmfault-rootcause.md) — vllm vs sglang对照:sglang verify sparse prefill在graph内分配动态score/topk/o张量,capture时_max_seqlen_k≈1+draft,replay时是真实prefix+draft,溢出VMFault;vllm解法是indexer graph-safe+sparse attn eager-break
+- [M3 verify graph temp tensor 根因](m3-verify-graph-temp-tensor-rootcause.md) — bs>=阈值VMFault真因:forward_extend用临时extend_seq_lens算cu_seqlens,capture后GC,replay读失效地址;修复改用seq_lens buffer+arange,graph-safe
