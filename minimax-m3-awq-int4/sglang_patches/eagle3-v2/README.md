@@ -174,8 +174,8 @@ bash sglang_patches/eagle3-v2/install.sh --check
 bash sglang_patches/eagle3-v2/install.sh --rollback
 
 # 安装后启动 EAGLE3 服务 (端口 8082, 默认开启 EAGLE3)
-bash sglang_patches/eagle3-v2/start.sh
-# 或仓库根的: bash minimax-m3-awq-int4/start.sh
+# start.sh 在仓库根 minimax-m3-awq-int4/ 下 (不在 patch 目录)
+bash minimax-m3-awq-int4/start.sh
 ```
 
 ## 前置条件 (目标容器)
@@ -183,16 +183,15 @@ bash sglang_patches/eagle3-v2/start.sh
 - sglang 已 `pip install`, 路径 `/usr/local/lib/python3.10/dist-packages/sglang/srt`
 - sglang 版本与本机一致 (`0.0.0.dev12695+g1df793665.d20260605`), 否则 patch 可能 apply 失败
 - Hygon DCU 环境 (gfx936/gfx928), `hip_moe_w4a16` backend (W4A16 moe-only 量化)
-- EAGLE3 draft 模型: `/models/Inferact/MiniMax-M3-EAGLE3`
+- EAGLE3 draft 模型: `/models/MiniMax-M3-EAGLE3`
 - 目标模型: MiniMax-M3-AWQ-INT4
 
 ## 文件清单
 
 ```
-eagle3-v2/
+eagle3-v2/                                 # patch 目录 (不含启动脚本)
 ├── README.md                              # 本文件
 ├── install.sh                             # 一键安装/检查/回滚 (12 文件)
-├── start.sh                               # 启动 EAGLE3 sglang 服务 (默认 EAGLE3, 端口 8082)
 ├── modified/                              # 12 个 patch 文件 (整文件覆盖)
 │   ├── minimax_m3_vl.py                   # EAGLE3 target 侧接口
 │   ├── minimax_sparse_backend.py          # verify 路由 + graph buffer 根治 (阶段2)

@@ -344,7 +344,7 @@ PYEOF
 if [ $? -eq 0 ]; then
   echo ""
   echo "=== ✅ EAGLE3 v2 patch 安装完成 (12 文件: 8 既有 + 4 verify 子模块) ==="
-  echo "下一步: bash $(dirname "$0")/start.sh  (或仓库根 minimax-m3-awq-int4/start.sh)"
+  echo "下一步: bash minimax-m3-awq-int4/start.sh  (默认 EAGLE3, 端口 8082)"
   echo "检查:   bash $(dirname "$0")/install.sh --check"
   echo "回滚:   bash $(dirname "$0")/install.sh --rollback"
 else
