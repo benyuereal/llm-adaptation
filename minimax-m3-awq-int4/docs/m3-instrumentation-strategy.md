@@ -101,6 +101,18 @@ M3-AWQ-INT4 在 sglang 上表现为"流畅但不聪明":所有评估集精度比
 | **当时发现** | `iv.weight_shape absmax=0`、`idx_v=0.0000` → 当前运行是"情况 A"(idx_v=0,数值碰巧无害但依赖 CUDA 零页,是未定义行为);`disable_index_value` 恒 False → 确认 Bug B(index_v/o_proj 假支路) |
 | **当前状态** | **已清理**(已安装 `minimax_m3.py` 无 IDX/IDX-REAL)。无独立留档文件(直接 print 类探针,定位后即删)。修复逻辑(用 `layer_types` 判定 sparse 层 + `get_minimax_sparse_disable_value_layer_ids` 修复)保留在 `minimax_m3.py` 和 `model_config.py` |
 
+### 2.7 EAGLE3 verify VMFault 探针(cuda graph 地址漂移定位)
+
+| 项 | 内容 |
+|---|---|
+| **用途** | 定位 EAGLE3 TARGET_VERIFY 在 cuda graph 下崩 KERNEL VMFault 的真正根因。阶段1 (score buffer 恒定上界) 修复后仍崩, 需确认是哪个张量在 capture/replay 间地址/形状变化导致越界写 |
+| **实现** | `minimax_sparse_backend.py` 顶部 + `_forward_verify` 内, `prefill/flash_with_topk_idx.py` 顶部 + score/topk 分配后。环境变量 `EAGLE3_VERIFY_PROBE=1` 开启, 仅 TP rank0 输出, 写独立文件 `/workspace/logs/eagle3_verify_probe.log` |
+| **graph-safe 打印原则 (核心)** | capture 阶段 (`torch.cuda.is_current_stream_capturing()=True`) **只打静态属性** (data_ptr/shape/stride/dtype), **绝不同步** (不 `.item()`/`.cpu()`/`.tolist()`); replay/eager 阶段可同步, 打 ptr + 少量值。关键: capture 和 replay **都打 data_ptr** —— graph buffer 的 ptr 应恒定, 临时张量的 ptr 会变, 这是定位越界张量的核心信号 |
+| **输出格式** | 每行带 `[V CAPTURE]` 或 `[V REPLAY]` 标签 + layer/bs/D, 后跟每个张量的 `tag: {CAPTURE\|REPLAY} shape=... ptr=0x...`。对比同 layer 同 bs 的 CAPTURE vs REPLAY 行, ptr 不同的张量即地址漂移元凶 |
+| **性能影响** | 默认关 (`EAGLE3_VERIFY_PROBE=0`), 零开销。开启后每 verify 每层打 ~8 个张量, 有 I/O 开销 (仅排查用) |
+| **当时发现** | `cu_seqlens` / `seq_lens` 的 data_ptr 在 capture≠replay (旧 `forward_extend` 用 `torch.cat`/`a+b` 现场构造临时张量), 而 `extend_seq_lens`/`prefix_lens` 稳定 → 确认阶段2 根因是临时张量地址漂移, 非 score 上界 |
+| **当前状态** | **已清理** (探针代码已从 `minimax_sparse_backend.py` 和 `prefill/flash_with_topk_idx.py` 移除, 根因定位完成)。修复 (专用 verify kernel + `init_cuda_graph_state` 预分配 3 个 graph buffer, capture/replay 写同一 buffer) 保留在 `sglang_patches/eagle3-v2/`。未来遇类似 cuda graph 越界问题可按本节 graph-safe 原则重新加探针 |
+
 ---
 
 ## 3. M3_TRACE 逐层 trace 机制

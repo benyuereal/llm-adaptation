@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import TYPE_CHECKING, Optional
 
 import torch
@@ -27,75 +26,6 @@ if TYPE_CHECKING:
     from sglang.srt.model_executor.model_runner import ModelRunner
 
 logger = logging.getLogger(__name__)
-
-# ============================================================================
-# EAGLE3 verify VMFault 定位探针
-# 开关: EAGLE3_VERIFY_PROBE=1 启用(默认关). 仅 TP rank0 输出.
-# 输出: /workspace/logs/eagle3_verify_probe.log (独立文件, 不污染推理日志)
-# graph-safe: capture 阶段(is_current_stream_capturing)只打静态属性, 绝不同步.
-# 目标: 定位 verify 走 prefill kernel 时, 哪个张量在 capture/replay 间地址/形状
-#       变化导致越界写 VMFault.
-# ============================================================================
-_VERIFY_PROBE = os.environ.get("EAGLE3_VERIFY_PROBE", "0") == "1"
-_VERIFY_PROBE_RANK = 0
-try:
-    if _VERIFY_PROBE:
-        from sglang.srt.distributed import get_tensor_model_parallel_rank
-        _VERIFY_PROBE_RANK = get_tensor_model_parallel_rank()
-except Exception:
-    pass
-_PROBE_FH = None
-if _VERIFY_PROBE and _VERIFY_PROBE_RANK == 0:
-    try:
-        _PROBE_FH = open("/workspace/logs/eagle3_verify_probe.log", "a", buffering=1)
-        _PROBE_FH.write(f"\n===== EAGLE3 verify probe started pid={os.getpid()} =====\n")
-    except Exception:
-        _PROBE_FH = None
-
-
-def _probe_log(msg: str):
-    if _PROBE_FH is not None:
-        try:
-            _PROBE_FH.write(msg + "\n")
-            _PROBE_FH.flush()
-        except Exception:
-            pass
-
-
-def _probe_tensor(tag: str, t, max_vals=32):
-    """graph-safe 打印 tensor. capture: 只打静态属性(ptr/shape/stride); replay/eager: 打值.
-    关键: capture 和 replay 都打 ptr —— graph buffer 的 ptr 在 capture/replay 间应恒定,
-    临时张量的 ptr 会变. 这是定位越界张量的核心信号."""
-    if not _VERIFY_PROBE or _VERIFY_PROBE_RANK != 0:
-        return
-    if t is None:
-        _probe_log(f"  {tag}: None")
-        return
-    try:
-        if not isinstance(t, torch.Tensor):
-            _probe_log(f"  {tag}: {t}")
-            return
-        if t.numel() == 0:
-            _probe_log(f"  {tag}: empty shape={tuple(t.shape)} dtype={t.dtype} ptr={t.data_ptr()}")
-            return
-        capturing = torch.cuda.is_current_stream_capturing()
-        ptr = t.data_ptr()
-        shape = tuple(t.shape)
-        stride = tuple(t.stride())
-        if capturing:
-            # capture: 绝不同步, 只打静态属性
-            _probe_log(f"  {tag}: CAPTURE shape={shape} stride={stride} dtype={t.dtype} ptr={ptr:#x}")
-        else:
-            # replay/eager: 可同步, 打 ptr + 少量值
-            flat = t.detach()
-            if flat.numel() <= max_vals:
-                vals = flat.tolist()
-            else:
-                vals = (f"shape={shape} dtype={flat.dtype} "
-                        f"min={flat.min().item()} max={flat.max().item()}")
-            _probe_log(f"  {tag}: REPLAY shape={shape} stride={stride} dtype={t.dtype} ptr={ptr:#x} vals={vals}")
-    except Exception as e:
-        _probe_log(f"  {tag}: probe-err {e}")
 
 
 
@@ -252,13 +182,12 @@ class MiniMaxSparseAttnBackend(AttentionBackend):
     def init_cuda_graph_state(self, max_bs: int, max_num_tokens: int):
         # Pre-allocate graph-stable buffers for EAGLE3 TARGET_VERIFY.
         #
-        # Probe (EAGLE3_VERIFY_PROBE) confirmed that the OLD verify path built
-        # `cu_seqlens` / `seq_lens` / `extend_seq_lens` with torch.cat / torch.full
-        # / `a + b` INSIDE forward_extend. Those are fresh temporaries each call
-        # -> their data_ptr differs between capture and replay -> cuda graph
-        # captured the capture-time ptr, but replay reads a different address
-        # -> garbage / VMFault. This is the REAL root cause the upper-bound
-        # score fix alone did not solve.
+        # The OLD verify path built `cu_seqlens` / `seq_lens` / `extend_seq_lens`
+        # with torch.cat / torch.full / `a + b` INSIDE forward_extend. Those are
+        # fresh temporaries each call -> their data_ptr differs between capture
+        # and replay -> cuda graph captured the capture-time ptr, but replay
+        # reads a different address -> garbage / VMFault. This is the REAL root
+        # cause the upper-bound score fix alone did not solve.
         #
         # Fix: pre-allocate these as graph buffers here (one-shot, address fixed
         # for the backend's lifetime), and in forward_extend's verify branch
@@ -635,25 +564,6 @@ class MiniMaxSparseAttnBackend(AttentionBackend):
             seq_lens = prefix_lens + extend_seq_lens
 
         original_num_tokens = q.shape[0]
-
-        # ---- probe: confirm buffer addresses are stable capture vs replay ----
-        if _VERIFY_PROBE and _VERIFY_PROBE_RANK == 0:
-            try:
-                _cap = torch.cuda.is_current_stream_capturing()
-                _tag = "CAPTURE" if _cap else "REPLAY"
-                _probe_log(f"[V {_tag}] _forward_verify layer={layer.layer_id} "
-                           f"bs={bs} D={int(self._max_seqlen_q)} "
-                           f"max_seqblock_k_upper={self.max_seqblock_k_upper} "
-                           f"disable_value={disable_value}")
-                _probe_tensor("  q", q)
-                _probe_tensor("  cu_seqlens(buf)", cu_seqlens)
-                _probe_tensor("  extend_seq_lens(buf)", extend_seq_lens)
-                _probe_tensor("  seq_lens(buf)", seq_lens)
-                _probe_tensor("  prefix_lens(fb.seq_lens)", prefix_lens)
-                _probe_tensor("  req_pool_indices", forward_batch.req_pool_indices)
-                _probe_tensor("  out_cache_loc", forward_batch.out_cache_loc)
-            except Exception as _e:
-                _probe_log(f"[V] probe-err: {_e}")
 
         idx_o, o = minimax_sparse_verify_prefill(
             q,

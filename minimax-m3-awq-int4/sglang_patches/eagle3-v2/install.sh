@@ -15,7 +15,7 @@
 #   阶段2 — cu_seqlens/seq_lens 临时张量地址漂移 (真正根因):
 #     旧 forward_extend 用 torch.cat / a+b 现场构造 cu_seqlens/seq_lens, 每次
 #     new 临时张量 → data_ptr capture≠replay → graph 锁 capture 地址, replay
-#     读到别处 → garbage/VMFault。(探针 EAGLE3_VERIFY_PROBE 已确认。)
+#     读到别处 → garbage/VMFault。(capture/replay 地址比对已确认, 探针策略见 docs/m3-instrumentation-strategy.md)
 #     修复: 新建 verify/ 专用 kernel (minimax_sparse_verify_prefill), 并在
 #           init_cuda_graph_state 预分配 3 个 graph buffer (地址固定),
 #           capture/replay 写入同一 buffer (data_ptr 不变) → graph-safe。

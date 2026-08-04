@@ -6,7 +6,6 @@
 # 要求:已运行 sglang_patches/eagle3-v2/install.sh 安装 EAGLE3 patch。
 #
 # 用法: bash /workspace/llm-adaptation/minimax-m3-awq-int4/start.sh
-# 排查 VMFault 时: EAGLE3_VERIFY_PROBE=1 bash start.sh (开探针, 见 README)
 
 set -euo pipefail
 
@@ -39,11 +38,6 @@ export SGLANG_USE_AITER=0
 export SGLANG_MOE_TORCH_FALLBACK=0
 # 日志实时落盘:非 tty 下 Python 默认块缓冲,会憋着不 flush,看起来日志不更新
 export PYTHONUNBUFFERED=1
-
-# EAGLE3 verify/prefill VMFault 定位探针 (minimax_sparse_backend.py 顶部读此变量)
-# 输出独立文件 /workspace/logs/eagle3_verify_probe.log, 不污染推理日志。
-# 默认关闭(正常服役无需开); 排查时用 `EAGLE3_VERIFY_PROBE=1 bash start.sh`。
-export EAGLE3_VERIFY_PROBE="${EAGLE3_VERIFY_PROBE:-0}"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 3b. MoE kernel fix for gfx936 (K100AI/BW100)
@@ -89,9 +83,6 @@ CONTEXT_LEN=204800
 LOG_DIR="${LOG_DIR:-/workspace/logs}"
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/sglang_eagle3.log"
-PROBE_FILE="$LOG_DIR/eagle3_verify_probe.log"
-# 清空上次探针日志, 保证本次输出干净 (探针每次启动会 append "started" 行)
-: > "$PROBE_FILE" 2>/dev/null || true
 echo "Starting EAGLE3 at $(date)" > "$LOG_FILE"
 echo "Using --mem-fraction-static ${MEM_FRAC} --cuda-graph-max-bs ${CUDA_GRAPH_BS}" | tee -a "$LOG_FILE"
 

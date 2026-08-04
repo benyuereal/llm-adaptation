@@ -49,8 +49,8 @@ capture/replay 形状恒定; kernel 内 `block_num` 仍从真实 `seq_lens` 算,
 
 ### 阶段2 — cu_seqlens/seq_lens 临时张量地址漂移 (真正根因)
 
-阶段1 修复后**仍崩 VMFault**。加探针 (`EAGLE3_VERIFY_PROBE`) 记录 capture/replay 时
-传给 verify kernel 的所有张量 data_ptr, 发现:
+阶段1 修复后**仍崩 VMFault**。通过 capture/replay 张量地址追踪 (探针策略见
+`docs/m3-instrumentation-strategy.md`) 记录传给 verify kernel 的所有张量 data_ptr, 发现:
 
 | 张量 | capture data_ptr | replay data_ptr | 稳定? |
 |---|---|---|---|
@@ -103,12 +103,16 @@ capture/replay 形状恒定; kernel 内 `block_num` 仍从真实 `seq_lens` 算,
 > 注: `prefix_lens = forward_batch.seq_lens.to(int32)`, 而 `seq_lens` buffer 是 int32
 > (`cuda_graph_runner.py` 确认), `.to(int32)` 是 no-op 返回 self, 地址稳定, graph-safe。
 
-### probe 如何定位根因
+### 探针策略 (代码已移除, 仅留文档)
 
-`EAGLE3_VERIFY_PROBE=1` 环境变量开启探针, `_forward_verify` 每次 capture/replay 都把
-所有输入张量的 `data_ptr` / `shape` / `dtype` 写到 `/workspace/logs/eagle3_verify_probe.log`。
-对比 `[V CAPTURE]` 与 `[V REPLAY]` 行即可看出哪个张量地址漂了。正是这个探针确认了
-`cu_seqlens`/`seq_lens` 地址变化 (而非 score 上界) 才是阶段1 修复后仍崩的真正根因。
+定位阶段2 根因时用过一套 graph-safe 探针: `EAGLE3_VERIFY_PROBE=1` 开启, `_forward_verify`
+每次 capture/replay 把所有输入张量的 `data_ptr` / `shape` / `dtype` 写到独立日志, 对比
+`[V CAPTURE]` 与 `[V REPLAY]` 行即可看出哪个张量地址漂了 —— 正是它确认了 `cu_seqlens`/
+`seq_lens` 地址变化 (而非 score 上界) 才是阶段1 修复后仍崩的真正根因。
+
+**探针代码已从 patch 中移除** (根因定位完成, 留着增加维护面)。探针的完整设计 (graph-safe
+打印原则、capture 阶段只打静态属性绝不同步、replay 打值、按 data_ptr 比对地址漂移) 记录在
+`docs/m3-instrumentation-strategy.md`, 未来遇类似 cuda graph 越界问题时可按该策略重新加。
 
 ---
 
@@ -232,9 +236,8 @@ eagle3-v2/                                 # patch 目录 (不含启动脚本)
    python test_verify_graph_buffers.py        # 阶段2: graph buffer 逻辑 (纯CPU, 8 组)
    python test_vmfault_graph_repro.py         # 阶段1: 真越界复现 (需GPU, ~10秒)
    ```
-3. 若需复现探针定位: `export EAGLE3_VERIFY_PROBE=1` 后重启, 看
-   `/workspace/logs/eagle3_verify_probe.log` 里 `[V CAPTURE]` vs `[V REPLAY]` 的
-   `cu_seqlens(buf)` / `seq_lens(buf)` data_ptr 是否相同 (相同 = 阶段2 修复生效)
+3. 若仍崩且怀疑是新的 graph 地址漂移: 按 `docs/m3-instrumentation-strategy.md` 的
+   graph-safe 探针策略临时加探针, 对比 capture/replay 的张量 data_ptr
 4. 确认 sglang 版本一致 (版本不一致是 patch apply 后行为异常的最常见原因)
 
 若崩 `OutOfResources: shared memory 69632 > 65536`:

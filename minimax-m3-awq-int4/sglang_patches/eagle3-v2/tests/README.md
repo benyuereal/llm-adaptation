@@ -35,7 +35,7 @@ tl.store(s_ptrs, val, boundary_check=(0,1))                     # 写 score[...,
 
 ### 阶段 2 — verify_prefill kernel + graph buffer (test 3, 根治)
 
-阶段 1 的 score 上界修复**不够**: 探针(EAGLE3_VERIFY_PROBE)确认 `cu_seqlens` /
+阶段 1 的 score 上界修复**不够**: capture/replay 地址比对确认 `cu_seqlens` /
 `seq_lens` / `extend_seq_lens` 在旧 `forward_extend` 里用 `torch.cat` / `a+b` /
 `torch.full` 现场构造, 每次 new 出临时张量 → **data_ptr 在 capture 与 replay 不同**
 → graph 锁了 capture 时地址, replay 读到别处 → garbage/VMFault。这才是真正根因。

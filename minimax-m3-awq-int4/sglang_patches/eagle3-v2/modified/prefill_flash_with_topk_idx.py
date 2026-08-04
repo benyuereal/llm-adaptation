@@ -1,6 +1,5 @@
 # Copyright 2025 XunhaoLai. All rights reserved.
 
-import os
 from typing import Optional
 
 import torch
@@ -8,24 +7,6 @@ import triton
 import triton.language as tl
 
 from ..common.utils import get_cu_seqblocks, robust_allocator
-
-# VMFault 定位探针 (与 backend 共用 EAGLE3_VERIFY_PROBE 开关)
-_PROBE_ON = os.environ.get("EAGLE3_VERIFY_PROBE", "0") == "1"
-_PROBE_FH = None
-if _PROBE_ON:
-    try:
-        _PROBE_FH = open("/workspace/logs/eagle3_verify_probe.log", "a", buffering=1)
-    except Exception:
-        _PROBE_FH = None
-
-
-def _plog(msg):
-    if _PROBE_FH is not None:
-        try:
-            _PROBE_FH.write(msg + "\n"); _PROBE_FH.flush()
-        except Exception:
-            pass
-
 
 
 @triton.heuristics(
@@ -570,29 +551,6 @@ def flash_prefill_with_topk_index(
         device=q.device,
     )
 
-    # VMFault 探针: 记录 graph 内分配张量的形状/地址 + grid 参数
-    # capture 时分配, replay 复用同一地址. 记录 capture 时的形状, 确认是否恒定.
-    if _PROBE_ON:
-        try:
-            _cap = torch.cuda.is_current_stream_capturing()
-            _tag = "CAPTURE" if _cap else "REPLAY/EAGER"
-            _plog(f"[F {_tag}] flash_prefill_with_topk_index allocs:")
-            _plog(f"  total_q={total_q} num_heads={num_heads} batch_size={batch_size} "
-                  f"max_seqlen_q={max_seqlen_q} max_seqlen_k={max_seqlen_k} "
-                  f"max_seqblock_k={max_seqblock_k} score_max_seqblock_k={score_max_seqblock_k} "
-                  f"max_seqblock_q={max_seqblock_q} all_seqblock_q={all_seqblock_q} "
-                  f"block_size_q={block_size_q} block_size_k={block_size_k} topk={topk}")
-            _plog(f"  score shape={tuple(score.shape)} stride={tuple(score.stride())} "
-                  f"dtype={score.dtype} ptr={score.data_ptr():#x}")
-            if o is not None:
-                _plog(f"  o shape={tuple(o.shape)} stride={tuple(o.stride())} ptr={o.data_ptr():#x}")
-            else:
-                _plog(f"  o None (disable_index_value)")
-            _plog(f"  cu_seqblocks_q={cu_seqblocks_q.tolist() if cu_seqblocks_q.numel()<=32 else 'long'}")
-        except Exception as _e:
-            _plog(f"[F] probe-err: {_e}")
-
-
     # launch kernel
     def grid(META):
         return (triton.cdiv(max_seqlen_q, META["BLOCK_SIZE_Q"]), batch_size * num_heads)
@@ -647,13 +605,6 @@ def flash_prefill_with_topk_index(
         device=score.device,
         dtype=torch.int32,
     )
-    if _PROBE_ON:
-        try:
-            _plog(f"  topk_idx shape={tuple(topk_idx.shape)} stride={tuple(topk_idx.stride())} "
-                  f"ptr={topk_idx.data_ptr():#x}")
-            _plog(f"  _topk_index_kernel grid=(max_seqblock_q={max_seqblock_q}, batch_size={batch_size}, num_heads={num_heads})")
-        except Exception:
-            pass
     # launch kernel
     grid = (max_seqblock_q, batch_size, num_heads)
     _topk_index_kernel[grid](
