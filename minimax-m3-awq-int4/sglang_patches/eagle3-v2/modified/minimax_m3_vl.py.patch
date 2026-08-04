@@ -1,0 +1,113 @@
+--- /models/sglang_backup_eagle3/minimax_m3_vl.py	2026-08-04 11:06:38.032321823 +0800
++++ /workspace/llm-adaptation/minimax-m3-awq-int4/sglang_patches/eagle3-v2/modified/minimax_m3_vl.py	2026-08-04 12:53:18.366439898 +0800
+@@ -130,6 +130,41 @@
+ 
+         self.logits_processor = LogitsProcessor(text_config)
+ 
++        # For EAGLE3: aux hidden state capture flag (set by set_eagle3_layers_to_capture).
++        self.capture_aux_hidden_states = False
++
++    def set_eagle3_layers_to_capture(self, layer_ids: Optional[List[int]] = None):
++        """EAGLE3 target-side hook (patched in for VL class).
++
++        M3 text-only class (MiniMaxM3SparseForCausalLM) has this, but the VL
++        class (loaded by quantized checkpoints) did not. Also wires the per-layer
++        ``_is_layer_to_capture`` flag that MiniMaxM3Model.forward reads but no
++        upstream code was setting (unlike qwen3_moe which setattrs it here).
++        """
++        if not self.pp_group.is_last_rank:
++            return
++
++        self.capture_aux_hidden_states = True
++
++        # VL class: text config lives at self.config.text_config (MiniMaxM3Model
++        # itself does not retain a .config attribute, unlike the text-only class).
++        num_layers = self.config.text_config.num_hidden_layers
++        if layer_ids is None:
++            # [2, N//2, N-3] = [2, 30, 57] for N=60 — matches the draft's 3 aux
++            # layers (FC in_features = 18432 = 3 * 6144).
++            layers_to_capture = [2, num_layers // 2, num_layers - 3]
++        else:
++            layers_to_capture = [val + 1 for val in layer_ids]
++
++        self.model.layers_to_capture = layers_to_capture
++        for layer_id in layers_to_capture:
++            if 0 <= layer_id < len(self.model.layers):
++                setattr(self.model.layers[layer_id], "_is_layer_to_capture", True)
++
++    def get_embed_and_head(self):
++        """EAGLE3 draft shares the target's embedding and lm_head."""
++        return self.model.embed_tokens.weight, self.lm_head.weight
++
+     def _determine_num_fused_shared_experts(self) -> None:
+         text_config = self.config.text_config
+         if get_global_server_args().disable_shared_experts_fusion:
+@@ -201,12 +236,20 @@
+             pp_proxy_tensors=pp_proxy_tensors,
+         )
+ 
++        # EAGLE3: MiniMaxM3Model returns (hidden_states, aux_hidden_states) when
++        # the captured layers appended aux states; unpack and forward aux to the
++        # logits processor (mirrors text-only MiniMaxM3SparseForCausalLM.forward).
++        aux_hidden_states = None
++        if self.capture_aux_hidden_states and isinstance(hidden_states, tuple):
++            hidden_states, aux_hidden_states = hidden_states
++
+         if self.pp_group.is_last_rank and not get_embedding:
+             return self.logits_processor(
+                 input_ids,
+                 hidden_states,
+                 self.lm_head,
+                 forward_batch,
++                aux_hidden_states,
+             )
+         return hidden_states
+ 
+@@ -289,10 +332,6 @@
+         if "block_sparse_moe" in name:
+             name = name.replace("block_sparse_moe", "mlp")
+ 
+-        # Checkpoint has "out_proj" for attention output, model uses "o_proj"
+-        if "self_attn.out_proj." in name:
+-            name = name.replace("self_attn.out_proj.", "self_attn.o_proj.")
+-
+         layer_id = get_layer_id(name)
+         if layer_id is not None and (
+             layer_id < self.model.start_layer or layer_id >= self.model.end_layer
+@@ -324,15 +363,7 @@
+             if new_name.endswith(".bias") and new_name not in params_dict:
+                 continue
+             if new_name not in params_dict:
+-                # compressed-tensors uses weight_packed instead of weight
+-                if new_name.endswith(".weight"):
+-                    packed_name = new_name[:-len(".weight")] + ".weight_packed"
+-                    if packed_name in params_dict:
+-                        new_name = packed_name
+-                    else:
+-                        continue
+-                else:
+-                    continue
++                continue
+             param = params_dict[new_name]
+             param.weight_loader(param, loaded_weight, shard_id)
+             return
+@@ -364,17 +395,8 @@
+         if remapped is None:
+             return
+         if remapped not in params_dict:
+-            # compressed-tensors uses weight_packed instead of weight
+-            if remapped.endswith(".weight"):
+-                packed_name = remapped[:-len(".weight")] + ".weight_packed"
+-                if packed_name in params_dict:
+-                    remapped = packed_name
+-                else:
+-                    logger.warning(f"Parameter {remapped} not found in params_dict")
+-                    return
+-            else:
+-                logger.warning(f"Parameter {remapped} not found in params_dict")
+-                return
++            logger.warning(f"Parameter {remapped} not found in params_dict")
++            return
+         param = params_dict[remapped]
+         weight_loader = getattr(param, "weight_loader", default_weight_loader)
+         try:
