@@ -876,15 +876,20 @@ class MiniMaxSparseAttnBackend(AttentionBackend):
             max_seqblock_k_upper = (
                 self._max_seqlen_k_upper + self.block_size_k - 1
             ) // self.block_size_k
-            # ---- 精细探针 F: verify kernel 调用前, 捕获所有输入 shape/ptr/值 ----
+            # ---- 精细探针 F: verify kernel 调用前, 捕获所有输入 shape/ptr/值 + grid ----
             # 目的: 定位 bs=16 graph replay 崩溃. capture 时打 (replay 时 Python 跳过).
+            # 关键: 打印 grid 计算用的 max_seqlen_q (崩溃 grid=(256,1,1) 暗示 max_seqlen_q=16384)
             if (_VERIFY_PROBE and _VERIFY_PROBE_RANK == 0
                     and torch.cuda.is_current_stream_capturing()):
                 try:
+                    import triton as _triton
                     _bs = seq_lens.shape[0]
+                    _grid_x = _triton.cdiv(self._max_seqlen_q, 64)  # BLOCK_SIZE_Q=64
+                    _grid_y = _bs * q.shape[1]
                     _probe_log(f"[F CAPTURE] layer={layer.layer_id} bs={_bs} "
                                f"max_seqlen_q={self._max_seqlen_q} max_seqlen_k={self._max_seqlen_k} "
-                               f"max_seqblock_k_upper={max_seqblock_k_upper}")
+                               f"max_seqblock_k_upper={max_seqblock_k_upper} "
+                               f"num_heads={q.shape[1]} → Step1 grid=({_grid_x},{_grid_y})")
                     _probe_log(f"  q: shape={tuple(q.shape)} ptr={q.data_ptr()} contig={q.is_contiguous()}")
                     _probe_log(f"  idx_q: shape={tuple(idx_q.shape)} ptr={idx_q.data_ptr()}")
                     _probe_log(f"  k_cache: shape={tuple(k_cache.shape)} ptr={k_cache.data_ptr()}")
@@ -900,9 +905,10 @@ class MiniMaxSparseAttnBackend(AttentionBackend):
                     _probe_log(f"  req_to_token: shape={tuple(self.req_to_token.shape)} ptr={self.req_to_token.data_ptr()}")
                     _probe_log(f"  out_cache_loc: shape={tuple(forward_batch.out_cache_loc.shape)} "
                                f"ptr={forward_batch.out_cache_loc.data_ptr()}")
-                    # capture 时是 dummy 值, 但 shape 是关键
-                    _probe_log(f"  [F] capture bs={_bs}: cu_seqlens shape={tuple(cu_seqlens.shape)} "
-                               f"(应=[bs+1]), seq_lens shape={tuple(seq_lens.shape)} (应=[bs])")
+                    # 关键: 若 max_seqlen_q != D, grid 会错 (崩溃 grid=(256,1,1) → max_seqlen_q=16384)
+                    if self._max_seqlen_q != self.num_draft_tokens:
+                        _probe_log(f"  [F 警告] max_seqlen_q={self._max_seqlen_q} != D={self.num_draft_tokens}! "
+                                   f"grid 会用错值 → 可能越界")
                 except Exception as _e:
                     _probe_log(f"[F CAPTURE] probe-err: {_e}")
             idx_o, o = minimax_sparse_verify_prefill(
