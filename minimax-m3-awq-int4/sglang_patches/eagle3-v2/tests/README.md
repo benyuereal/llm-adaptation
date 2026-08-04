@@ -147,7 +147,7 @@ python test_verify_graph_buffers.py
 离线测试全过后, 起服务做端到端:
 
 ```bash
-bash ../start_eagle3.sh            # 等待 "server is fired up"
+bash ../start.sh                   # 等待 "server is fired up" (默认 EAGLE3)
 # 跑 ≥2 个请求 (上次崩在第 2 个请求 decode 阶段, 单请求 #running-req:1)
 ```
 

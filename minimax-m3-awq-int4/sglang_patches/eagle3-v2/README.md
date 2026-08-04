@@ -173,8 +173,9 @@ bash sglang_patches/eagle3-v2/install.sh --check
 # 回滚 (从备份恢复 8 既有文件 + 删除 verify/ 子模块)
 bash sglang_patches/eagle3-v2/install.sh --rollback
 
-# 安装后启动 EAGLE3 服务 (端口 8082)
-bash sglang_patches/eagle3-v2/start_eagle3.sh
+# 安装后启动 EAGLE3 服务 (端口 8082, 默认开启 EAGLE3)
+bash sglang_patches/eagle3-v2/start.sh
+# 或仓库根的: bash minimax-m3-awq-int4/start.sh
 ```
 
 ## 前置条件 (目标容器)
@@ -191,7 +192,7 @@ bash sglang_patches/eagle3-v2/start_eagle3.sh
 eagle3-v2/
 ├── README.md                              # 本文件
 ├── install.sh                             # 一键安装/检查/回滚 (12 文件)
-├── start_eagle3.sh                        # 启动 EAGLE3 sglang 服务 (端口 8082)
+├── start.sh                               # 启动 EAGLE3 sglang 服务 (默认 EAGLE3, 端口 8082)
 ├── modified/                              # 12 个 patch 文件 (整文件覆盖)
 │   ├── minimax_m3_vl.py                   # EAGLE3 target 侧接口
 │   ├── minimax_sparse_backend.py          # verify 路由 + graph buffer 根治 (阶段2)

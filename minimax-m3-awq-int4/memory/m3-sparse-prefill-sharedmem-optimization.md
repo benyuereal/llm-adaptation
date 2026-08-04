@@ -10,7 +10,7 @@ metadata:
 
 ## 现象
 
-`start_eagle3.sh` 启动 sglang serve 时, CUDA graph capture 阶段(`init_device_graphs` → `capture`, bs=16)抛:
+`start.sh` 启动 sglang serve 时, CUDA graph capture 阶段(`init_device_graphs` → `capture`, bs=16)抛:
 
 ```
 triton.runtime.errors.OutOfResources: out of resource: shared memory,
@@ -87,7 +87,7 @@ configs=[
 
 ## 后续动作(待跑通后)
 
-1. [ ] 清 Triton 缓存重启: `rm -rf ~/.triton/cache && bash start_eagle3.sh`
+1. [ ] 清 Triton 缓存重启: `rm -rf ~/.triton/cache && bash start.sh`
 2. [ ] 跑通后, 用代表性长上下文请求测 prefill tokens/s, 对比预期
 3. [ ] 若 prefill 慢到不可接受 → 评估给 kernel 加运行时分支(按上下文长度/卡型选 config)
 4. [ ] 确认无误后, 把此临时修复正式合入 `sglang_patches/` 的 patch(当前只改了 site-packages, 未进 patch 体系)

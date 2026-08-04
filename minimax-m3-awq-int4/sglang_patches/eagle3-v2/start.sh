@@ -1,12 +1,12 @@
 #!/bin/bash
-# MiniMax-M3 AWQ-INT4 + EAGLE3 投机解码 — DCU (gfx928/gfx936) 启动脚本
-# 端口 8082
+# MiniMax-M3 AWQ-INT4 + EAGLE3 投机解码 — DCU (gfx928/gfx936) 默认启动脚本
+# 端口 8082 (默认开启 EAGLE3 投机解码)
 #
-# 基于 start.sh (量化版,含 DTK/HIP/lightop 环境变量 + compressed-tensors 量化)
-# 融合 start_eagle3.sh 的 EAGLE3 参数,修正草稿模型路径。
-# 要求:已运行 sglang_patches/eagle3/install.sh 安装 EAGLE3 patch。
+# 含 DTK/HIP/lightop 环境变量 + EAGLE3 speculative 参数。
+# 要求:已运行 sglang_patches/eagle3-v2/install.sh 安装 EAGLE3 patch。
 #
-# 用法: bash /workspace/llm-adaptation/minimax-m3-awq-int4/start_eagle3.sh
+# 用法: bash /workspace/llm-adaptation/minimax-m3-awq-int4/start.sh
+# 排查 VMFault 时: EAGLE3_VERIFY_PROBE=1 bash start.sh (开探针, 见 README)
 
 set -euo pipefail
 
@@ -27,8 +27,8 @@ export LD_LIBRARY_PATH="/opt/dtk/lib:/opt/dtk/hip/lib:/opt/dtk/dcc/lib:/opt/hyha
 export TRITON_HIP_USE_BLOCK_PINGPONG=0
 export HIP_FORCE_DEV_KERNARG=1
 export CUDA_HOME=/opt/dtk
-# VMFault 根因已定位(sparse prefill Step3 _gqa_share_sparse_fwd_kernel 在 cuda graph
-# 内 score 张量动态尺寸溢出). 修复=Path1 Strategy A: verify 走 graph-safe decode kernel.
+# EAGLE3 TARGET_VERIFY VMFault 已两层根治 (专用 verify kernel + graph buffer, 见
+# sglang_patches/eagle3-v2/README.md). 本脚本默认稳定服役配置。
 # HIP_LAUNCH_BLOCKING=1 已移除(定位专用, 会让推理极慢; 性能测试必须关).
 # export HIP_LAUNCH_BLOCKING=1
 
@@ -41,8 +41,9 @@ export SGLANG_MOE_TORCH_FALLBACK=0
 export PYTHONUNBUFFERED=1
 
 # EAGLE3 verify/prefill VMFault 定位探针 (minimax_sparse_backend.py 顶部读此变量)
-# 输出独立文件 /workspace/logs/eagle3_verify_probe.log, 不污染推理日志
-export EAGLE3_VERIFY_PROBE=1
+# 输出独立文件 /workspace/logs/eagle3_verify_probe.log, 不污染推理日志。
+# 默认关闭(正常服役无需开); 排查时用 `EAGLE3_VERIFY_PROBE=1 bash start.sh`。
+export EAGLE3_VERIFY_PROBE="${EAGLE3_VERIFY_PROBE:-0}"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 3b. MoE kernel fix for gfx936 (K100AI/BW100)
@@ -75,8 +76,8 @@ rm -rf "$TRITON_CACHE_DIR"/* ~/.triton/* /tmp/torchinductor_root 2>/dev/null || 
 # mem-fraction-static=0.85: 0.90 会在权重加载(process_weights transpose/contiguous)
 #   阶段 OOM,0.85 与之前 RSF 跑通配置一致,留足加载临时空间
 # context-length=204800: 限制上下文 20万(>>HumanEval 最长 33K),省 score buffer
-#   (方案C 上界 context_len:1M→20万,score 单卡 0.45GB→0.09GB)与 req_to_token pool
-# cuda-graph-max-bs=16: verify 全 cuda graph(方案C),bs=16
+#   (max_seqblock_k_upper = cdiv(204800+4,128)=1601, score 单卡 ~0.09GB) 与 req_to_token pool
+# cuda-graph-max-bs=16: verify 全 cuda graph, bs 上限 16
 # ──────────────────────────────────────────────────────────────────────────────
 MEM_FRAC=0.85
 CUDA_GRAPH_BS=16

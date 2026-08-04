@@ -18,16 +18,13 @@ cd /workspace/llm-adaptation/minimax-m3-awq-int4
 git add -A
 
 # 2. 提交
-git commit -m "EAGLE3 verify: Strategy B + graph-safety 修复
+git commit -m "eagle3-v2: 专用 verify kernel + graph buffer 根治 VMFault
 
-- 新增 verify/ 3 个 graph-safe kernel (固定上界 score buffer + OOB 双保险)
-- minimax_sparse_backend: target_verify 路由新 verify kernel;
-  forward_extend verify 分支 graph-safety 修复 (绕过临时 extend_seq_lens,
-  改用 seq_lens buffer + arange, 修复 bs>=并发阈值 VMFault)
-- start_eagle3.sh: speculative-attention-mode 改回 prefill
-- 新增 tests/ (graph-safety/精度/越界/性能/graph复现/HumanEval)
-- 新增 memory/ (Claude 工作记忆快照, 可移植)
-- 废弃 Strategy A (decode kernel 无 causal, 对话 garbage)
+- 两层根治: 阶段1 score buffer 恒定上界 + 阶段2 graph buffer (地址稳定)
+- 新建 verify/ 专用 verify_prefill kernel 子模块 (4 文件)
+- init_cuda_graph_state 预分配 graph buffer, capture/replay 写同一 buffer
+- 删除 v1 eagle3/ (含废弃 Strategy A), 清理过时 .patch
+- start_eagle3.sh → start.sh (默认 EAGLE3 启动)
 
 Co-Authored-By: Claude <noreply@anthropic.com>"
 
@@ -48,20 +45,16 @@ mkdir -p /root/.claude/projects/-workspace/memory/
 cp memory/*.md /root/.claude/projects/-workspace/memory/
 
 # 3. 安装 EAGLE3 patch
-bash sglang_patches/eagle3/install.sh
+bash sglang_patches/eagle3-v2/install.sh
 
-# 4. 跑离线测试 (前 5 个全过再起服务)
-cd sglang_patches/eagle3/tests
-bash README.md  # 看 tests/README.md 的运行顺序
-python test_verify_graph_buffer.py        # 最先: graph-safety 修复验证
-python test_verify_prefill_precision.py   # 精度
-python test_verify_oob_collision.py       # 越界碰撞
-python test_verify_perf.py                # 性能
-python test_verify_graph_capture_replay.py # kernel 级 graph 复现
+# 4. 跑离线测试 (CPU 测试先过再起服务, 见 tests/README.md)
+cd sglang_patches/eagle3-v2/tests
+python test_vmfault_score_upper_bound.py   # 阶段1: score 形状一致性 (纯CPU, 秒级)
+python test_verify_graph_buffers.py        # 阶段2: graph buffer 逻辑 8 组 (纯CPU)
+# python test_vmfault_graph_repro.py        # 阶段1: 真越界复现 (需GPU, 可选)
 
-# 5. 起服务 + 端到端 HumanEval
-bash sglang_patches/eagle3/start_eagle3.sh  # 等 "server is fired up"
-python verify_humaneval_eagle3.py
+# 5. 起服务 + 端到端压测
+bash start.sh                               # 等 "server is fired up" (默认 EAGLE3, 端口 8082)
 ```
 
 ---
@@ -80,7 +73,7 @@ scp minimax-m3-awq-int4.tar.gz <新机器>:/workspace/
 cd /workspace && tar xzf minimax-m3-awq-int4.tar.gz
 mkdir -p /root/.claude/projects/-workspace/memory/
 cp /workspace/llm-adaptation/minimax-m3-awq-int4/memory/*.md /root/.claude/projects/-workspace/memory/
-bash /workspace/llm-adaptation/minimax-m3-awq-int4/sglang_patches/eagle3/install.sh
+bash /workspace/llm-adaptation/minimax-m3-awq-int4/sglang_patches/eagle3-v2/install.sh
 ```
 
 ---
@@ -114,8 +107,8 @@ tar xzf /tmp/claude-workspace.tar.gz -C /root/.claude/projects
    `/usr/local/lib/python3.10/dist-packages/sglang/srt`
 2. **模型权重**:
    - 主模型 `/models/MiniMax-M3-AWQ-INT4`(W4A16 moe-only)
-   - 草稿 `/models/Inferact/MiniMax-M3-EAGLE3`(BF16)
-   (路径可在 `start_eagle3.sh` 里改)
+   - 草稿 `/models/MiniMax-M3-EAGLE3`(BF16)
+   (路径可在 `start.sh` 里改)
 3. **量化 patch**:先应用上级 `sglang_patches/modified/` 的量化 patch
    (`bash apply_patch.sh`),让模型能正确加载,再装 EAGLE3 patch
 4. **sitecustomize.py**:注册 `minimax_m3_sparse` layer type(见上级目录)
@@ -133,14 +126,16 @@ print('patch 安装成功, import OK')
 "
 
 # 跑 graph-safety 测试 (最快, 验证修复在)
-cd /workspace/llm-adaptation/minimax-m3-awq-int4/sglang_patches/eagle3/tests
-python test_verify_graph_buffer.py
-# 预期: PASS — 旧实现 graph-unsafe, 新实现 graph-safe
+cd /workspace/llm-adaptation/minimax-m3-awq-int4/sglang_patches/eagle3-v2/tests
+python test_verify_graph_buffers.py
+# 预期: 8 组全过 — graph buffer 地址稳定, capture/replay data_ptr 相同
 ```
 
 ## 当前状态(2026-08-04)
 
-- **离线测试**:graph-safety / 精度 / 越界 / 性能 / graph复现 **全 PASS**
-- **端到端**:单请求对话 OK;并发 16 HumanEval 触发 VMFault(根因 = forward_extend 临时
-  extend_seq_lens,已修复但**未在新代码下重跑端到端**——需在新机器验证)
-- **待办**:在新机器 `bash install.sh` → 跑离线测试 → 起服务 → 并发 16 HumanEval 确认不崩
+- **离线测试**:阶段1 score 形状一致性 + 阶段2 graph buffer 逻辑 (8 组) **全 PASS**
+  (`install.sh --check` 17 ✓)
+- **端到端**:并发 8 × 每请求 1000 tokens 压测通过, accept rate ~0.59, 无 VMFault。
+  两层根因 (score 动态尺寸 + cu_seqlens/seq_lens 地址漂移) 均已根治。
+- VMFault 排查: `EAGLE3_VERIFY_PROBE=1 bash start.sh`, 看
+  `/workspace/logs/eagle3_verify_probe.log` 的 `[V CAPTURE]` vs `[V REPLAY]` 地址稳定性
