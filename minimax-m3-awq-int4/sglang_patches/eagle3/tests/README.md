@@ -69,7 +69,21 @@ python test_verify_graph_capture_replay.py
 # 预期: PASS — graph capture/replay 不崩, eager vs graph diff=0
 ```
 
-### 6. `verify_humaneval_eagle3.py` — 端到端 HumanEval(**需先起服务**)
+### 6. `test_verify_sglang_graph_e2e.py` — sglang 式端到端 graph 复现(**最接近真实**)
+
+模拟 sglang 的 cuda graph 机制,验证修复后 verify 在 bs=16 不崩。模拟三个关键机制:
+- 真实 graph 内存池(`torch.cuda.graph_pool_handle`)
+- buffer 预分配 + replay populate 改值(capture dummy seq_lens=1,replay copy_ 真实 prefix,不重新分配)
+- forward_extend verify 分支(修复后 `arange` + `seq_lens buffer + D`)
+
+测两场景:bs=16 graph e2e(崩溃点,对比 eager 基线)+ bs=10 padding(raw_bs<capture_bs)。
+
+```bash
+python test_verify_sglang_graph_e2e.py
+# 预期: ALL PASS — bs=16 graph 不崩, 输出与 eager 一致; padding 场景 OK
+```
+
+### 7. `verify_humaneval_eagle3.py` — 端到端 HumanEval(**需先起服务**)
 
 全量 164 题 HumanEval,并发 16,打 sglang EAGLE3 服务(端口 8082)。验证端到端不崩 +
 正确率 + 吞吐。**这是最终验证,前 5 个测试全过后,起服务再跑。**
@@ -90,11 +104,11 @@ python verify_humaneval_eagle3.py
 
 - `test_m3_eagle3_verify_sparse.py` — verify 字段补全逻辑单测(不起服务),仍有效。
 
-## 一键跑前 5 个离线测试
+## 一键跑前 6 个离线测试
 
 ```bash
 cd /workspace/llm-adaptation/minimax-m3-awq-int4/sglang_patches/eagle3/tests
-for t in test_verify_graph_buffer test_verify_prefill_precision test_verify_oob_collision test_verify_perf test_verify_graph_capture_replay; do
+for t in test_verify_graph_buffer test_verify_prefill_precision test_verify_oob_collision test_verify_perf test_verify_graph_capture_replay test_verify_sglang_graph_e2e; do
   echo "===== $t ====="
   python $t.py 2>&1 | grep -vE "UserWarning|setattr|_float_to_str|smallest_subnormal|NUMA|aiter" | tail -8
 done
