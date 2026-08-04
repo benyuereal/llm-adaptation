@@ -146,21 +146,6 @@ class MiniMaxSparseAttnBackend(AttentionBackend):
         # draft_token_num. seq_lens.max() <= context_len, and the largest
         # draft_token_num seen is speculative_num_draft_tokens; add one extra
         # block of slack to be safe against off-by-one at block boundaries.
-        #
-        # Tuning knob (performance, graph-safe): the score buffer is allocated
-        # [num_heads, total_q, max_seqblock_k_upper] EVERY layer EVERY verify
-        # (57 sparse layers x per-token verify). context_len (e.g. 204800) gives
-        # a very loose bound (1601 blocks) when real requests are far shorter
-        # (~hundreds-thousands tokens) -> most allocated score memory is unused
-        # but still costs alloc + -inf init each verify.
-        # MINIMAX_SPARSE_MAX_KV_LEN lets you cap the bound to your real max
-        # single-request KV length WITHOUT shrinking --context-length (which
-        # limits the model's supported context). It must stay a CONSTANT (read
-        # once at init, never live seq_len) to remain graph-safe. Default 0 =
-        # use full context_len (unchanged behavior). The replay path
-        # (init_forward_metadata_replay_cuda_graph) fail-fast asserts the real
-        # seq_len+D never exceeds this bound, so setting it too small raises a
-        # clear error instead of silently OOB-writing -> VMFault.
         context_len = int(getattr(runner.model_config, "context_len", 0) or 0)
         if context_len <= 0:
             context_len = 1
@@ -168,15 +153,7 @@ class MiniMaxSparseAttnBackend(AttentionBackend):
         # fall back to a generous constant if the spec arg is absent/zero
         if max_draft <= 0:
             max_draft = 8
-        # Optional tighter graph-safe cap. min() with context_len so it can only
-        # tighten, never widen beyond the model's declared context.
-        _user_cap = int(os.environ.get("MINIMAX_SPARSE_MAX_KV_LEN", "0") or 0)
-        if _user_cap > 0:
-            effective_ctx = min(context_len, _user_cap)
-        else:
-            effective_ctx = context_len
-        self._sparse_effective_ctx = effective_ctx
-        max_seqlen_k_bound = effective_ctx + max_draft
+        max_seqlen_k_bound = context_len + max_draft
         self.max_seqblock_k_upper = (
             max_seqlen_k_bound + self.block_size_k - 1
         ) // self.block_size_k
@@ -387,27 +364,6 @@ class MiniMaxSparseAttnBackend(AttentionBackend):
             # buffer filled by replay_prepare with the real per-request prefix).
             # Write prefix+D into our pre-allocated buffer (address-stable).
             self._verify_seq_lens_buf[:bs] = seq_lens[:bs].to(torch.int32) + D
-            # Fail-fast safety check: the score buffer's 3rd dim is the CONSTANT
-            # max_seqblock_k_upper (sized off effective_ctx, possibly tightened
-            # via MINIMAX_SPARSE_MAX_KV_LEN). The kernel's K-block loop runs to
-            # the REAL seq_len, and writes score[..., block_id]; if real
-            # block_num > max_seqblock_k_upper that write is OOB -> VMFault
-            # (the in-kernel assert can't catch this because we pass
-            # _max_seqlen_k = upper*bsk, making it a tautology). replay runs in
-            # the scheduler (host-side, seq_lens_cpu is a CPU tensor) so we can
-            # check the REAL max here and raise a clear error instead of a
-            # silent VMFault. This is what makes MINIMAX_SPARSE_MAX_KV_LEN safe
-            # to set small.
-            real_max_k = int(seq_lens_cpu[:bs].max().item()) + D
-            need_blocks = (real_max_k + self.block_size_k - 1) // self.block_size_k
-            assert need_blocks <= self.max_seqblock_k_upper, (
-                f"[MiniMaxSparse] verify score upper bound too small: "
-                f"max_seqblock_k_upper={self.max_seqblock_k_upper} blocks but "
-                f"real max seq_len+D={real_max_k} needs {need_blocks} blocks. "
-                f"Increase MINIMAX_SPARSE_MAX_KV_LEN (currently "
-                f"{self._sparse_effective_ctx}) to >= {real_max_k}, or unset it "
-                f"to use full context_len."
-            )
         else:
             self._max_seqlen_q = 1
             self._max_seqlen_k = int(seq_lens_cpu[:bs].max().item())

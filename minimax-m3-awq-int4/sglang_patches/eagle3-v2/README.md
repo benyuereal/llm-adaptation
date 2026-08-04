@@ -210,46 +210,8 @@ eagle3-v2/                                 # patch 目录 (不含启动脚本)
     ├── README.md                          # 测试说明 + 运行顺序
     ├── test_vmfault_score_upper_bound.py  # 阶段1: score 形状一致性回归 (纯CPU, 秒级)
     ├── test_vmfault_graph_repro.py        # 阶段1: 真越界写复现 (需GPU, cuda graph)
-    ├── test_verify_graph_buffers.py       # 阶段2: graph buffer 逻辑单元测试 (纯CPU, 8 组)
-    └── test_sparse_max_kv_len_knob.py     # 性能旋钮 MINIMAX_SPARSE_MAX_KV_LEN (纯CPU, 6 组)
+    └── test_verify_graph_buffers.py       # 阶段2: graph buffer 逻辑单元测试 (纯CPU, 8 组)
 ```
-
-## 性能调优: MINIMAX_SPARSE_MAX_KV_LEN (score buffer 上界收紧)
-
-verify kernel **每 layer 每 verify** 都分配 `score[num_heads, total_q, max_seqblock_k_upper]`
-(57 sparse 层 × decode 循环里每个 token 都 verify)。`max_seqblock_k_upper` 默认 =
-`cdiv(context_len + D, block_size_k) = cdiv(204800+4, 128) = 1601`, 但真实请求远短于
-20万 token (实测并发 16 时平均 ~1300 token, 真实 block 数 ~11), score 按 1601 分配但
-只填前 ~11 维 → 57 层 × 每 verify 的 alloc + `-inf` init 开销浪费 (分配量是真实需要的
-~145 倍)。**kernel 内部计算仍按真实 seq_len 走 (无无效计算), 浪费只在分配 + 初始化。**
-
-`MINIMAX_SPARSE_MAX_KV_LEN` 环境变量收紧这个上界 (仍 graph-safe 常量), **不改
-`--context-length`** (后者限制模型支持的上下文, 不能动):
-
-```bash
-# 例: 真实最长请求 ~3万 token, 设 32768 → 上界 257 (从 1601 降 6.2x, score 分配同降)
-export MINIMAX_SPARSE_MAX_KV_LEN=32768
-bash minimax-m3-awq-int4/start.sh
-```
-
-| 配置 | max_seqblock_k_upper | score/层 (bs=16) | 降幅 |
-|---|---|---|---|
-| 默认 (不设) | 1601 | 3.1 MB | 1x |
-| `=32768` | 257 | 0.5 MB | 6.2x |
-| `=16384` | 129 | 0.25 MB | 12.4x |
-| `=8192` | 65 | 0.13 MB | 24.6x |
-
-**安全性**: 上界是 graph-safe 常量 (init 时读一次, 非 live seq_len)。设太小不会静默
-VMFault —— replay 路径 (`init_forward_metadata_replay_cuda_graph`) 用真实 `seq_lens_cpu`
-做 fail-fast 检查, 真实 `seq_len+D` 超过上界时抛清晰 AssertionError (提示调大旋钮),
-而非 OOB 写 → VMFault。kernel 内的 assert 抓不住这个 (verify 传 `_max_seqlen_k =
-upper*bsk` 使其变恒等式), 所以 replay 的 host 侧检查是必需的安全网。
-
-**取值建议**: 设为「真实部署中单请求最大 KV 长度」的上取整。可先观察日志
-`token usage` 与 `#token / #running-req` 估算平均请求长度, 取一个略大于最长的值。
-设错 (太小) 会 fail-fast 报错, 调大即可, 无副作用。
-
-测试: `tests/test_sparse_max_kv_len_knob.py` (6 组纯 CPU, 验证收紧逻辑 + fail-fast)。
 
 ## 验证 EAGLE3 是否生效
 
