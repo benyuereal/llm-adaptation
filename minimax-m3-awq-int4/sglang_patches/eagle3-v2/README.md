@@ -12,16 +12,19 @@
 
 | | eagle3 (v1) | **eagle3-v2** (本目录) |
 |---|---|---|
-| 改动文件数 | 3 + 新增 `verify/` 4 文件 | **仅 3 个文件** |
+| 改动文件数 | 3 + 新增 `verify/` 4 文件 | **6 个文件** (3 EAGLE3 接口 + 3 DCU/cuda-graph kernel) |
 | verify 路径 | Strategy B 新 kernel (`verify_sparse`) | **标准 `minimax_sparse_prefill`** |
 | 是否带 Strategy A | 是 (`seqlens_expand_triton`, 已废弃) | **否** |
 | VMFault 修复 | score 固定上界 + 临时 tensor 绕过 | **同根因, 更精简的实现** |
+| DCU shared-mem / cuda-graph 兼容 | ❌ 未含 (别机必崩) | **✅ 含 3 个 kernel 修复** |
 | 来源 | git 仓库提交 (8-4 上午, 端到端根因当时未确认) | **本机 site-packages 在跑版** |
 
 v1 在 git 历史里 (commit `5417311`) 自己承认"端到端根因仍未确认"。
 v2 = 本机后来演化出、实际在跑的精简版 (绕开整个 verify/ 子模块)。
 
-## 改动的 3 个文件
+## 改动的 6 个文件
+
+### A. EAGLE3 接口与 graph-safe 修复 (3 个)
 
 | 文件 | site-packages 目标 | 作用 |
 |---|---|---|
@@ -29,7 +32,22 @@ v2 = 本机后来演化出、实际在跑的精简版 (绕开整个 verify/ 子�
 | `modified/minimax_sparse_backend.py` | `sglang/srt/layers/attention/minimax_sparse_backend.py` | TARGET_VERIFY 字段 materialize (`extend_seq_lens=None→draft_token_num`) + K 长度=`prefix+draft` 重建 + graph-safe (capture/replay 用静态 `q.shape[0]`, 不 host sync) |
 | `modified/utils.py` | `sglang/srt/layers/attention/minimax_sparse_ops/common/utils.py` | `get_cu_seqblocks` graph-safe (`.sum().item()` host sync → capture 下静态上界 `batch*max_seqblock`) |
 
+### B. DCU/HIP + cuda-graph 兼容性修复 (3 个 sparse_ops kernel)
+
+这 3 个是 EAGLE3 让 sparse **prefill** 首次进入 cuda graph 后才暴露的 DCU 兼容问题。
+**不加这 3 个, 别机必崩** (本机因已 in-place 改过 site-packages 才不崩):
+
+| 文件 | site-packages 目标 | 作用 |
+|---|---|---|
+| `modified/prefill_topk_sparse.py` | `…/minimax_sparse_ops/prefill/topk_sparse.py` | DCU 64KB shared-mem 限制 → `_PREFILL_NUM_STAGES=[1] if is_hip() else [2,3]`。原版写死 `num_stages=2,3` (~68KB) 超 65536 → prefill 崩 `OutOfResources: shared memory 69632 > 65536` |
+| `modified/decode_topk_sparse.py` | `…/minimax_sparse_ops/decode/topk_sparse.py` | 同上, decode kernel `_NUM_STAGES=[1] if is_hip() else [2,3,4,5]`, decode 路径同样会超 shared-mem |
+| `modified/decode_flash_with_topk_idx.py` | `…/minimax_sparse_ops/decode/flash_with_topk_idx.py` | cuda-graph capture 期间禁用 side_stream fork (`torch.cuda.is_stream_capturing()` → `side_stream=None`)。原版无条件 `torch.cuda.Stream()` fork 新 stream, capture 期间非法 → 多 batch cuda graph 崩 |
+
 每个文件同时附 `.patch` (基于 sglang 干净原版的 unified diff), 供审计/手工 apply。
+
+> ⚠ **为何之前别机装了 v2 仍崩**: 早期 v2 只含 A 组 3 个文件, B 组 3 个 kernel 是本机直接改
+> site-packages 的, 一直没进 patch 体系。别机装完 v2 后这 3 个 kernel 仍是原版 →
+> prefill/decode 超 shared-mem 崩 + cuda-graph fork stream 崩。本版补齐 B 组后根治。
 
 ## VMFault 修复 (两层, 本版均已根治)
 
@@ -99,7 +117,13 @@ eagle3-v2/
 │   ├── minimax_sparse_backend.py
 │   ├── minimax_sparse_backend.py.patch
 │   ├── utils.py
-│   └── utils.py.patch
+│   ├── utils.py.patch
+│   ├── prefill_topk_sparse.py             # DCU shared-mem 修复
+│   ├── prefill_topk_sparse.py.patch
+│   ├── decode_topk_sparse.py              # DCU shared-mem 修复
+│   ├── decode_topk_sparse.py.patch
+│   ├── decode_flash_with_topk_idx.py      # cuda-graph side_stream 修复
+│   └── decode_flash_with_topk_idx.py.patch
 └── docs/
     └── (可放验证记录)
 ```
@@ -112,9 +136,19 @@ eagle3-v2/
 - 输出正确: 对话/代码不乱码不复读
 
 若崩 VMFault:
-- 确认 `--check` 全 ✓ 且无 v1 残留
+- 确认 `--check` 全 ✓ 且无 v1 残留 (尤其 6 个文件标记都要 ✓)
 - `start_eagle3.sh` 里 `EAGLE3_VERIFY_PROBE=1` 已开, 看 `/workspace/logs/eagle3_verify_probe.log`
 - 确认 sglang 版本一致 (版本不一致是 patch apply 后行为异常的最常见原因)
+
+若崩 `OutOfResources: shared memory 69632 > 65536`:
+- 这是 DCU 64KB shared-mem 限制, 说明 `prefill_topk_sparse.py` / `decode_topk_sparse.py`
+  的 `_NUM_STAGES` 修复没生效 → 跑 `install.sh --check` 确认这 2 个标记 ✓
+- 同时确认 `python3 -c "import torch; print(torch.version.hip)"` 非 None
+  (is_hip()=False 时 num_stages 仍会选 2,3 — 那是 PyTorch 装错成 CUDA 版, 不是 patch 问题)
+
+若多 batch cuda graph 崩 (stream capture 相关):
+- 说明 `decode_flash_with_topk_idx.py` 的 `is_stream_capturing` 修复没生效
+  → 跑 `install.sh --check` 确认该标记 ✓
 
 ## 与 v1 (`eagle3/`) 残留共存说明
 

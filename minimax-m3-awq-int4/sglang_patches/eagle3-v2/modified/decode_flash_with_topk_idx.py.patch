@@ -1,0 +1,55 @@
+--- /models/sglang_backup_eagle3_v2/decode_flash_with_topk_idx.py	2026-06-05 16:34:46.000000000 +0800
++++ /workspace/llm-adaptation/minimax-m3-awq-int4/sglang_patches/eagle3-v2/modified/decode_flash_with_topk_idx.py	2026-08-04 14:39:00.000000000 +0800
+@@ -963,6 +963,8 @@
+     # topk index and attn output merge on parallel streams
+     if disable_index_value:
+         side_stream = None
++    elif torch.cuda.is_stream_capturing():
++        side_stream = None
+     else:
+         side_stream = torch.cuda.Stream()
+         # fork: record event on default stream, then side_stream waits for it
+@@ -1014,27 +1016,24 @@
+     )
+     if disable_index_value:
+         return None, topk_idx
+-    # stream 1 (side): attn output merge
+-    with torch.cuda.stream(side_stream):
+-        grid = (batch_size, num_q_heads)
++    grid = (batch_size, num_q_heads)
++    if side_stream is not None:
++        with torch.cuda.stream(side_stream):
++            _merge_attn_out_kernel[grid](
++                o, lse, seq_lens, head_dim, block_size,
++                o.stride(0), o.stride(1), o.stride(2), o.stride(3),
++                lse.stride(0), lse.stride(1), lse.stride(2),
++                NUM_KV_CHUNKS=NUM_KV_CHUNKS,
++            )
++        event_join = torch.cuda.Event()
++        event_join.record(side_stream)
++        torch.cuda.current_stream().wait_event(event_join)
++    else:
+         _merge_attn_out_kernel[grid](
+-            o,
+-            lse,
+-            seq_lens,
+-            head_dim,
+-            block_size,
+-            o.stride(0),
+-            o.stride(1),
+-            o.stride(2),
+-            o.stride(3),
+-            lse.stride(0),
+-            lse.stride(1),
+-            lse.stride(2),
++            o, lse, seq_lens, head_dim, block_size,
++            o.stride(0), o.stride(1), o.stride(2), o.stride(3),
++            lse.stride(0), lse.stride(1), lse.stride(2),
+             NUM_KV_CHUNKS=NUM_KV_CHUNKS,
+         )
+-    # join: default stream waits for side_stream
+-    event_join = torch.cuda.Event()
+-    event_join.record(side_stream)
+-    torch.cuda.current_stream().wait_event(event_join)
+     o = o[0].contiguous()
+     return o, topk_idx

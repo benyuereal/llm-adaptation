@@ -11,7 +11,7 @@
 #     后走标准 prefill, K 长度=prefix+draft, prefix_lens 用 seq_lens graph buffer
 #   - v2 = 本机实测能跑的最终精简版 (VMFault 两层已根治)
 #
-# 改动的 3 个文件:
+# 改动的 6 个文件:
 #   minimax_m3_vl.py        : VL 类补 EAGLE3 target 侧接口
 #                             (set_eagle3_layers_to_capture / get_embed_and_head /
 #                              capture_aux_hidden_states flag + aux-aware forward)
@@ -20,6 +20,12 @@
 #                             (capture/replay 用静态 q.shape[0], 不 host sync)
 #   utils.py                : get_cu_seqblocks graph-safe
 #                             (.sum().item() host sync → capture 下静态上界)
+#   --- 以下 3 个为 DCU/HIP + cuda-graph 兼容性修复 (sparse_ops kernel) ---
+#   prefill_topk_sparse.py  : DCU 64KB shared-mem 限制 → num_stages=1 on HIP
+#                             (原版写死 2,3 → ~68KB 超 65536, prefill 崩 OutOfResources)
+#   decode_topk_sparse.py   : 同上, decode kernel num_stages=1 on HIP
+#   decode_flash_with_topk_idx.py: cuda-graph capture 期间禁用 side_stream fork
+#                             (原版无条件 fork 新 stream, capture 期间非法 → 多 batch 崩)
 #
 # 用法:
 #   bash sglang_patches/eagle3-v2/install.sh            # 安装
@@ -44,6 +50,9 @@ declare -A FILE_MAP=(
   ["minimax_m3_vl.py"]="$SGLANG_ROOT/models/minimax_m3_vl.py"
   ["minimax_sparse_backend.py"]="$SGLANG_ROOT/layers/attention/minimax_sparse_backend.py"
   ["utils.py"]="$SGLANG_ROOT/layers/attention/minimax_sparse_ops/common/utils.py"
+  ["prefill_topk_sparse.py"]="$SGLANG_ROOT/layers/attention/minimax_sparse_ops/prefill/topk_sparse.py"
+  ["decode_topk_sparse.py"]="$SGLANG_ROOT/layers/attention/minimax_sparse_ops/decode/topk_sparse.py"
+  ["decode_flash_with_topk_idx.py"]="$SGLANG_ROOT/layers/attention/minimax_sparse_ops/decode/flash_with_topk_idx.py"
 )
 
 # 每个 patch 文件的"已应用标记"
@@ -52,6 +61,9 @@ declare -A PATCH_MARKER=(
   ["minimax_m3_vl.py"]="set_eagle3_layers_to_capture"
   ["minimax_sparse_backend.py"]="is_target_verify"
   ["utils.py"]="is_current_stream_capturing"
+  ["prefill_topk_sparse.py"]="_PREFILL_NUM_STAGES"
+  ["decode_topk_sparse.py"]="_NUM_STAGES = [1] if _is_hip()"
+  ["decode_flash_with_topk_idx.py"]="is_stream_capturing"
 )
 
 # v2 独有的"精简版标记" — 区分 v2 与 v1 (v1 带 verify_sparse / seqlens_expand)
@@ -65,7 +77,7 @@ if [ "${1:-}" = "--check" ]; then
   for name in "${!FILE_MAP[@]}"; do
     target="${FILE_MAP[$name]}"
     marker="${PATCH_MARKER[$name]}"
-    if grep -q "$marker" "$target" 2>/dev/null; then
+    if grep -qF "$marker" "$target" 2>/dev/null; then
       echo "  ✓ $name: 含 '$marker'"
     else
       echo "  ✗ $name: 缺 '$marker' (未安装 v2)"; rc=1
@@ -73,7 +85,7 @@ if [ "${1:-}" = "--check" ]; then
   done
   # v1 残留检测
   be="${FILE_MAP[minimax_sparse_backend.py]}"
-  if grep -q "$V1_ONLY_MARKER" "$be" 2>/dev/null; then
+  if grep -qF "$V1_ONLY_MARKER" "$be" 2>/dev/null; then
     echo "  ⚠ sparse_backend 含 '$V1_ONLY_MARKER' — 这是 v1 (Strategy A) 残留, v2 不应存在"
     echo "    建议: 先 install.sh --rollback 清掉 v1, 再重新安装 v2"
     rc=1
@@ -106,7 +118,7 @@ if [ "${1:-}" = "--rollback" ]; then
   rm -rf /models/.triton_cache/* ~/.triton/* /tmp/torchinductor_root 2>/dev/null || true
   echo "  ✓ 已清 triton 缓存"
   echo "=== 回滚完成 ==="
-  echo "注意: 回滚只恢复 v2 改的 3 个文件。若之前装过 v1, verify/ 目录与 v1 残留需手动处理。"
+  echo "注意: 回滚只恢复 v2 改的 6 个文件。若之前装过 v1, verify/ 目录与 v1 残留需手动处理。"
   exit 0
 fi
 
@@ -125,7 +137,7 @@ fi
 
 # 前置警告: 若检测到 v1 残留 (Strategy A), 提示先清
 be_target="${FILE_MAP[minimax_sparse_backend.py]}"
-if [ -f "$be_target" ] && grep -q "$V1_ONLY_MARKER" "$be_target" 2>/dev/null; then
+if [ -f "$be_target" ] && grep -qF "$V1_ONLY_MARKER" "$be_target" 2>/dev/null; then
   echo "  ⚠ 检测到当前 sparse_backend 含 v1 (Strategy A) 标记 '$V1_ONLY_MARKER'"
   echo "    v2 会直接覆盖该文件, 但若你想先干净回滚 v1, 请 Ctrl-C 并运行:"
   echo "      bash sglang_patches/eagle3/install.sh --rollback   (v1 回滚)"
@@ -136,7 +148,7 @@ fi
 
 mkdir -p "$BACKUP_DIR"
 
-# 覆盖 3 个文件
+# 覆盖 6 个文件
 for name in "${!FILE_MAP[@]}"; do
   src="$PATCH_DIR/$name"
   target="${FILE_MAP[$name]}"
@@ -152,7 +164,7 @@ for name in "${!FILE_MAP[@]}"; do
   # 备份(仅当目标为干净原版: 不含 v2 标记)
   marker="${PATCH_MARKER[$name]}"
   if [ ! -f "$backup" ]; then
-    if grep -q "$marker" "$target" 2>/dev/null; then
+    if grep -qF "$marker" "$target" 2>/dev/null; then
       echo "  ⚠ $name 已含 patch 标记('$marker') — 可能已装过, 不备份(避免把 patch 版当原版)"
     else
       cp "$target" "$backup"
@@ -191,6 +203,19 @@ checks = [
     ("utils.py",
      f"{SGLANG}/layers/attention/minimax_sparse_ops/common/utils.py",
      "is_current_stream_capturing",
+     None),
+    # DCU/HIP + cuda-graph 兼容性 kernel 修复
+    ("prefill_topk_sparse.py",
+     f"{SGLANG}/layers/attention/minimax_sparse_ops/prefill/topk_sparse.py",
+     "_PREFILL_NUM_STAGES",          # HIP num_stages=1 修复
+     None),
+    ("decode_topk_sparse.py",
+     f"{SGLANG}/layers/attention/minimax_sparse_ops/decode/topk_sparse.py",
+     "_NUM_STAGES = [1] if _is_hip()",
+     None),
+    ("decode_flash_with_topk_idx.py",
+     f"{SGLANG}/layers/attention/minimax_sparse_ops/decode/flash_with_topk_idx.py",
+     "is_stream_capturing",          # cuda-graph capture 禁用 side_stream
      None),
 ]
 all_ok = True
