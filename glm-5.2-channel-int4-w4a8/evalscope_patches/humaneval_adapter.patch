@@ -1,0 +1,44 @@
+--- humaneval_adapter.py.orig	2026-08-21 18:19:53.044615773 +0800
++++ humaneval_adapter.py	2026-08-21 18:19:53.041615763 +0800
+@@ -53,7 +53,7 @@
+         aggregation='mean_and_pass_at_k',
+         eval_split='test',
+         prompt_template=
+-        'Read the following function signature and docstring, and fully implement the function described. Your response should only contain the code for this function.\n{question}',  # noqa: E501
++        'Read the following function signature and docstring, and fully implement the function described. Put your final complete implementation in the last markdown code block (```python).\n{question}',  # noqa: E501
+         review_timeout=4,
+         sandbox_config={
+             'image': 'python:3.11-slim',
+@@ -87,15 +87,26 @@
+ 
+     def extract_answer(self, prediction: str, task_state: TaskState) -> str:
+         """Extract code from the prediction."""
+-        return self._postprocess(prediction)
++        entry_point = task_state.metadata.get('entry_point') if task_state.metadata else None
++        return self._postprocess(prediction, entry_point=entry_point)
+ 
+     @classmethod
+-    def _postprocess(cls, text: str) -> str:
+-        """Extract code from markdown code blocks."""
++    def _postprocess(cls, text: str, entry_point: str = None) -> str:
++        """Extract code from markdown code blocks.
++
++        Strategy: prefer the last code block that defines the target
++        ``entry_point`` function (models in thinking mode sometimes emit
++        multiple blocks, e.g. a stray block from a neighboring problem);
++        fall back to the last block if no match is found.
++        """
+         blocks = re.findall(r'```\w*\n(.*?)```', text, re.DOTALL)
+-        if len(blocks) >= 1:
+-            text = blocks[0]
+-        return text
++        if not blocks:
++            return text
++        if entry_point:
++            for block in reversed(blocks):
++                if re.search(r'def\s+' + re.escape(entry_point) + r'\s*\(', block):
++                    return block
++        return blocks[-1]
+ 
+     def match_score(
+         self, original_prediction: str, filtered_prediction: str, reference: str, task_state: TaskState
