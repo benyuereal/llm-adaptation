@@ -38,9 +38,14 @@ declare -A FILE_MAP=(
 for f in "${!FILE_MAP[@]}"; do
   target="${FILE_MAP[$f]}"
   if [ -f "$target" ]; then
-    cp "$target" "${target}.bak"
-    cp "$MOD_DIR/$f" "$target"
-    echo "  ✓ [MODIFY] $f → $target"
+    # 检测内容是否一致 (已经是最新版本则跳过)
+    if diff -q "$MOD_DIR/$f" "$target" >/dev/null 2>&1; then
+      echo "  ⊘ [SKIP]   $f → 已是最新版本, 跳过"
+    else
+      cp "$target" "${target}.bak"
+      cp "$MOD_DIR/$f" "$target"
+      echo "  ✓ [MODIFY] $f → $target"
+    fi
   else
     echo "  ✗ [MODIFY] 目标不存在: $target"
     exit 1
@@ -49,6 +54,7 @@ done
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 2. Added files (base 没有, 我们新增的 tilelang 算子)
+#    检测: 若目标已存在且内容一致(已应用过), 跳过; 不一致则备份覆盖
 # ──────────────────────────────────────────────────────────────────────────────
 declare -A ADD_MAP=(
   ["mqa_logits.py"]="$VLLM_ROOT/model_executor/layers/mqa_logits.py"
@@ -59,9 +65,21 @@ declare -A ADD_MAP=(
 for f in "${!ADD_MAP[@]}"; do
   target="${ADD_MAP[$f]}"
   mkdir -p "$(dirname "$target")"
-  [ -f "$target" ] && cp "$target" "${target}.bak" || true
-  cp "$ADD_DIR/$f" "$target"
-  echo "  ✓ [ADD]     $f → $target"
+  if [ -f "$target" ]; then
+    # 已存在: 检测内容是否一致
+    if diff -q "$ADD_DIR/$f" "$target" >/dev/null 2>&1; then
+      echo "  ⊘ [SKIP]    $f → 已存在且内容一致, 跳过 (已应用过)"
+      continue
+    else
+      # 内容不一致: 可能是别的容器已手动改过, 备份后覆盖
+      cp "$target" "${target}.bak"
+      cp "$ADD_DIR/$f" "$target"
+      echo "  ⚠ [UPDATE]  $f → 已存在但内容不同, 已备份 .bak 并覆盖"
+    fi
+  else
+    cp "$ADD_DIR/$f" "$target"
+    echo "  ✓ [ADD]     $f → $target"
+  fi
 done
 
 # ──────────────────────────────────────────────────────────────────────────────
