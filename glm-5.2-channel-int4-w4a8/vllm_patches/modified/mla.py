@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 from dataclasses import dataclass
 
+import os
 import torch
 
 from vllm.attention.layer import MLAAttention

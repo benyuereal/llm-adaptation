@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Custom Sparse Attention Indexer layers."""
 
+import os
 import torch
 import vllm.envs as envs
 from vllm._aiter_ops import rocm_aiter_ops
@@ -260,6 +261,23 @@ def sparse_attn_indexer(
                         logits_slice.stride(1),
                         topk_tokens,
                     )
+                    # [FIX] lightop top_k_per_row_prefill 在短输入 (KV<topk_tokens)
+                    # 时, 不会像官方 _C kernel (csrc/sampler.cu:393-404) 那样把
+                    # 不足的槽位填 -1, 导致 topk_indices_buffer 残留 torch.empty
+                    # 的未初始化垃圾索引 (实测 min=-2e9, max=+1.9e9). shared 层
+                    # 复用这些垃圾索引会越界访问 KV cache -> sparse attention 算错
+                    # -> 最后几层 (L75-77) MoE router 退化 (std=0 均匀).
+                    # 修复: 写入后清洗越界索引为 -1 (下游 triton_convert + sparse
+                    # kernel 会把 -1 mask 掉).
+                    # per-row 清洗: 每行有效索引范围 [0, ke-ks), ks_slice/ke_slice
+                    # 是 per-token 的 KV 起止. topk 输出是相对 ks 的局部索引.
+                    row_kv_len = (ke_slice - ks_slice).to(
+                        torch.int32)  # [q_len]
+                    # broadcast: [q_len, 1] vs [q_len, topk_tokens]
+                    topk_indices_slice.masked_fill_(
+                        topk_indices_slice >= row_kv_len.unsqueeze(-1), -1)
+                    topk_indices_slice.masked_fill_(
+                        topk_indices_slice < -1, -1)
 
     if has_decode:
         decode_metadata = attn_metadata.decode
@@ -334,6 +352,10 @@ def sparse_attn_indexer(
                 logits.stride(1),
                 topk_tokens,
             )
+            # [FIX] 同 prefill: lightop top_k_per_row_decode 也可能残留垃圾索引,
+            # 清洗越界索引为 -1. decode 有效 KV 上限 = max_model_len.
+            topk_indices.masked_fill_(topk_indices >= max_model_len, -1)
+            topk_indices.masked_fill_(topk_indices < -1, -1)
         if decode_metadata.requires_padding:
             # if padded, we need to unpack
             # the topk indices removing padded tokens
