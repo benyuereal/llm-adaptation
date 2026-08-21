@@ -6,7 +6,7 @@
 #       只补跑没完成的题, 不必从头重跑 164 题。
 #
 # 注意: 思考模式长生成单题可达 600-900s, 必须加大 OpenAI client 超时, 否则
-#       剩余长题会 APITimeoutError 重试耗尽后异常退出 (173313 就是这样停在 151/164)。
+#       剩余长题会 APITimeoutError 重试耗尽后异常退出 (173313 用 600s 停在 153/164)。
 #       这里设 timeout=1800s (30分钟), 足够覆盖最慢的题。
 #
 # 前置: vLLM 服务已在跑 (bash start.sh), 且 evalscope 已应用提取修复 patch
@@ -21,8 +21,9 @@ MODEL=/models/GLM-5.2-Channel-INT4-w4a8
 API_URL=http://127.0.0.1:8000/v1/chat/completions
 WORK_DIR=./outputs/
 RESUME_DIR=/data1/csy/outputs/20260821_173313   # 要续跑的那次评测目录
-# timeout=1800s: 思考模式长生成单题可能 600-900s, 默认超时(600s)不够会 APITimeoutError
-GEN_CFG='{"temperature": 0.2, "top_p": 0.95, "max_tokens": 15900, "repetition_penalty": 1.05, "timeout": 1800}'
+# timeout=3600s: 思考模式长生成单题实测可达 3600s/it (max_tokens=15900 跑满),
+# 之前 600s/1800s 都会 APITimeoutError 重试耗尽后退出. 3600s (60分钟) 足够覆盖最慢的题.
+GEN_CFG='{"temperature": 0.2, "top_p": 0.95, "max_tokens": 15900, "repetition_penalty": 1.05, "timeout": 3600}'
 
 # 检查 vLLM 是否在跑
 if ! curl -s --max-time 3 http://127.0.0.1:8000/v1/models >/dev/null 2>&1; then
