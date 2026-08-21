@@ -14,6 +14,12 @@ GLM-5.2-Channel-INT4-w4a8（GlmMoeDsaForCausalLM）在 AMD ROCm gfx928（K100_AI
 
 **验证**：修复后 L75-77 退化消除（std 非零、zero%=0），HumanEval 66.5% → 78%。
 
+> **注**：此 bug 与长输入乱码（`glm52-long-input-garbage-rootcause.md`）都表现为
+> shared 层（L75/76/77）复用 buffer 出问题，但病因不同：本 bug 是 full 层 topk
+> 写入**垃圾索引**（短输入未填 -1），长输入乱码是 shared 层跑**零权重 indexer**
+> 污染 buffer。两者修复点不同（本 bug 清洗 topk 索引，长输入 bug 移植 skip_topk
+> 让 shared 层不跑 indexer）。
+
 ### 问题 2：非思考模式生成质量下降（评测配置问题）
 
 **根因**：早期评测用 `enable_thinking: false`（或误传到 `extra_body` 顶层被 vLLM 忽略）。

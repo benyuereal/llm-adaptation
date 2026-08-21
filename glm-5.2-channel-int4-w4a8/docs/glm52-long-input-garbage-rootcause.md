@@ -132,6 +132,13 @@ logits_slice = mqa_logits(q_slice, k_fp8, weights, ks, ke)  # 直接用返回值
 
 阈值 = `index_topk`(2048),完美解释现象。
 
+> **注**:此处"短输入不乱码"仅针对本 bug(shared 层零权重 indexer)。短输入另有
+> 一个独立 bug——lightop `top_k_per_row_prefill` 在 KV<2048 时未把不足槽位填 -1,
+> `topk_indices_buffer` 残留垃圾索引,L75/76/77 复用越界 → MoE 退化。该 bug 在
+> HumanEval 短输入场景命中(66.5%→78%),详见 `glm52-humaneval-precision-rootcause.md`
+> 问题 1。两者都是 shared 层复用 buffer 出问题,但病因不同:本 bug 是 shared 层
+> 跑零权重 indexer 污染 buffer,HumanEval 那个是 full 层 topk 写入垃圾索引。
+
 ## 七、修复验证
 
 | 配置 | 修复前 | 修复后 |
