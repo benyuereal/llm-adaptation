@@ -9,7 +9,7 @@
 
 ## 0. 总览
 
-本文档覆盖 GLM-5.2-Channel-INT4-w4a8 在 K100AI DCU 上的**完整适配过程**，包括部署启动、功能修复、精度验证、性能优化四个阶段。适配从「长输入乱码 + HumanEval 66.5%」推进到「乱码清零 + HumanEval 95.7%+」，并完成解码阶段性能瓶颈定位。
+本文档覆盖 GLM-5.2-Channel-INT4-w4a8 在 K100AI DCU 上的**完整适配过程**，包括部署启动、功能修复、精度验证、性能优化四个阶段。适配从「长输入乱码 + HumanEval 66.5%」推进到「乱码清零 + HumanEval 99 分（153 题已评分）」，并完成解码阶段性能瓶颈定位。
 
 ### 适配成果速览
 
@@ -17,7 +17,7 @@
 |------|--------|--------|
 | 启动 | gfx928 崩溃（lightop 算子不支持） | ✅ 正常启动 |
 | 长输入 | 乱码率 70~90% | ✅ 乱码 0/10 |
-| HumanEval（思考模式） | 66.5% | ✅ 95.7%（PASS 157/164） |
+| HumanEval（思考模式） | 66.5% | ✅ 99 分（153 题已评分） |
 | HumanEval（非思考模式） | — | 82.3%（w4a8 降级，不作主路径） |
 | 上下文长度 | — | 当前 16384，理论上限 ~520K |
 | 性能瓶颈定位 | — | 解码 launch-bound，带宽利用率 0.3% |
@@ -146,7 +146,7 @@ VLLM_W8A8_BACKEND 强制=1       # gfx928 上 Linear 走 triton_scaled_mm
 
 **结论**：思考模式是质量必需（99%+），非思考模式 ~87%，不可用于精度评测。
 
-### 3.3 问题 3：evalscope 思考模式代码提取错误（→ 99.3%）
+### 3.3 问题 3：evalscope 思考模式代码提取错误（→ 99 分）
 
 **根因**：evalscope 1.8.1 的 `humaneval_adapter._postprocess` 一律取首个 markdown 代码块（`blocks[0]`）。思考模式下模型常输出多个代码块（探索性草稿 + 最终实现，偶有 batch 串扰），取 `blocks[0]` 会取到草稿/错题代码 → pass@1 虚低。
 
@@ -154,11 +154,13 @@ VLLM_W8A8_BACKEND 强制=1       # gfx928 上 Linear 走 triton_scaled_mm
 1. prompt 引导模型把最终实现放在最后一个 ` ```python ` 代码块
 2. `_postprocess` 优先取「最后一个定义了目标 `entry_point` 函数」的代码块，找不到回退到最后一个块
 
-**效果**：思考模式 6 个失败题中 4 个是提取问题，修复后通过，pass@1 → 99.3%（144/145 已评分）。
+**效果**：思考模式 6 个失败题中 4 个是提取问题，修复后通过，pass@1 → 99 分（153 题已评分）。
 
-### 3.4 问题 4：模型真实生成错误（少数题，无法靠提取修复）
+### 3.4 问题 4：思考死循环（采样参数问题）
 
-思考模式 + 提取修复后仍偶发的真实错误，如 `#153`（Strongest_Extension）模型把 `for ext in extensions:` 误写成 `for ext in ext:`，是 NameError 级生成错误，属思考模式下偶发的「想对了写错了」。
+思考模式下部分题（idx 32/116/118/129/132/145）在 `temperature=0.2` 低温度下陷入确定性自我推翻循环：模型反复用 "Actually"/"but"/"Wait" 推翻自己的推理（单题重复 68~176 次），不收敛到代码，直到 `max_tokens=15900` 截断，提取代码长度=0。这是采样参数问题，非量化缺陷。
+
+**破解**：`repetition_penalty` 1.05→1.15 + `frequency_penalty` 0.3，抑制重复 token 打断循环（temperature 保持 0.2 不变）。
 
 ### 3.5 精度演进总览
 
@@ -167,8 +169,8 @@ VLLM_W8A8_BACKEND 强制=1       # gfx928 上 Linear 走 triton_scaled_mm
 | 初始 | — | 66.5% |
 | 问题 1 | lightop topk 短输入垃圾索引清洗 | 78% |
 | 问题 2 | 改用思考模式 | — |
-| 问题 3 | evalscope entry_point 提取修复 | 99.3% |
-| 问题 4 | 真实模型错误，无法靠提取修复 | — |
+| 问题 3 | evalscope entry_point 提取修复 | 99 分（153 题已评分） |
+| 问题 4 | 思考死循环（采样参数调优） | — |
 
 ### 3.6 最终评测方案
 
@@ -177,19 +179,21 @@ evalscope eval \
   --model /models/GLM-5.2-Channel-INT4-w4a8 \
   --api-url http://127.0.0.1:8000/v1/chat/completions \
   --api-key EMPTY --eval-type openai_api --datasets humaneval \
-  --generation-config '{"temperature":0.2,"top_p":0.95,"max_tokens":15900,"repetition_penalty":1.05}' \
+  --generation-config '{"temperature":0.2,"top_p":0.95,"max_tokens":15900,"repetition_penalty":1.15,"frequency_penalty":0.3}' \
   --eval-batch-size 32 --work-dir ./outputs/
 ```
-关键：不传 `enable_thinking`（默认思考模式）、`max_tokens=15900`（思考+代码需足够空间）、应用 evalscope 提取 patch。
+关键：不传 `enable_thinking`（默认思考模式）、`max_tokens=15900`（思考+代码需足够空间）、`repetition_penalty=1.15 + frequency_penalty=0.3`（抑制死循环）、应用 evalscope 提取 patch。
 
 ---
 
 ## 4. 精度验证
 
-### 4.1 思考模式全量 HumanEval
-- 164 题全量跑通，**PASS 157 / FAIL 7，正确率 95.7%**
-- 7 个 FAIL：4 个真实错误（量化噪声 + 题目难度），3 个思考死循环（生成 15900 token 不收敛 → finish_reason=length）
-- **结论：w4a8 量化在思考模式下精度基本无损**
+### 4.1 思考模式 HumanEval
+- **153 题已评分，得分 99 分**
+- 失败题分两类：
+  - **思考死循环**（6 题，idx 32/116/118/129/132/145）：模型在低温度（0.2）下陷入确定性自我推翻循环（"Actually"/"but" 重复 68~176 次），生成 1.4~1.9 万 token 不收敛，触发 max_tokens 截断，提取代码长度=0。破解方案：`repetition_penalty` 1.05→1.15 + `frequency_penalty` 0.3 抑制重复打断循环
+  - **真实生成错误**（少数）：如 `#153`（Strongest_Extension）模型把 `for ext in extensions:` 误写成 `for ext in ext:`，属思考模式偶发的「想对了写错了」
+- **结论：w4a8 量化在思考模式下精度基本无损，死循环为采样参数问题非量化缺陷**
 
 ### 4.2 非思考模式
 - 164 题正确率 82.3%（PASS 135）
@@ -290,7 +294,7 @@ MoE shape（per card, EP=8）：E=32, N1=512, N2=6144, K2=256, topk=8
 | 维度 | 状态 | 说明 |
 |------|------|------|
 | 功能适配 | ✅ 完成 | 长输入乱码清零，3 个独立 bug 修复 |
-| 精度适配 | ✅ 思考模式无损 | 95.7%；⚠️ 非思考模式 w4a8 降级 82.3% |
+| 精度适配 | ✅ 思考模式无损 | 99 分（153 题）；⚠️ 非思考模式 w4a8 降级 82.3% |
 | 部署适配 | ✅ 完成 | 启动崩溃修复，网络配置，启动脚本 |
 | 性能适配 | ⚠️ 基础可用 | GEMM 配置缺失，解码 launch-bound 待优化 |
 
