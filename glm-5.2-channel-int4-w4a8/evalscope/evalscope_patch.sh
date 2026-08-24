@@ -1,0 +1,128 @@
+#!/bin/bash
+# evalscope 1.8.1 — HumanEval 思考模式提取修复 — 一键应用/回滚 patch
+#
+# 用法:
+#   bash evalscope/evalscope_patch.sh install   # 应用 patch (默认)
+#   bash evalscope/evalscope_patch.sh revert    # 从 .bak 回滚
+#
+# 背景: GLM-5.2 等模型在思考模式下, HumanEval 回答常包含多个 markdown 代码块
+#   (探索性的草稿 + 最终实现, 偶尔混入相邻题目的代码块). evalscope 原版
+#   _postprocess 一律取 blocks[0], 会取到草稿/错题代码 -> 误判 FAIL,
+#   HumanEval pass@1 显著偏低.
+#
+# 修复 (仅 humaneval_adapter.py, 思考模式相关, 不影响其它 benchmark):
+#   1. prompt_template 引导模型把最终实现放在最后一个 ```python 代码块
+#   2. _postprocess 优先取「最后一个定义了目标 entry_point 函数」的代码块,
+#      找不到则回退到最后一个块 (而非第一个)
+#
+# 验证: 思考模式 HumanEval 100% → 99%+ (真实模型错误除外, 非提取问题)
+# 适用: evalscope==1.8.1 (其它版本需重新核对上下文)
+#
+# 非侵入: 不修改 evalscope 其它文件; 不应用也不影响主适配工作,
+#         仅思考模式下 HumanEval 提取偶发错题.
+set -euo pipefail
+
+CMD="${1:-install}"
+
+EVALSCOPE_ROOT=$(python3 -c "import evalscope, os; print(os.path.dirname(evalscope.__file__))" 2>/dev/null)
+if [ -z "$EVALSCOPE_ROOT" ]; then
+    echo "[ERROR] 找不到 evalscope 安装路径, 请确认 evalscope 已安装且 python3 可用"
+    exit 1
+fi
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PATCH_DIR="$SCRIPT_DIR"
+
+TARGET="$EVALSCOPE_ROOT/benchmarks/humaneval/humaneval_adapter.py"
+NEW="$PATCH_DIR/humaneval_adapter.py"
+BAK="${TARGET}.bak"
+
+# 清理 __pycache__ 避免加载旧字节码
+clean_pyc() {
+    local PYC_DIR="$(dirname "$TARGET")/__pycache__"
+    if [ -d "$PYC_DIR" ]; then
+        rm -f "$PYC_DIR"/humaneval_adapter.*.pyc 2>/dev/null && \
+            echo "  ♻ [CLEAN] 已清理 humaneval_adapter __pycache__"
+    fi
+}
+
+# 语法检查, 失败则回滚
+check_syntax() {
+    echo ""
+    echo "=== 语法检查 ==="
+    if python3 -c "import ast; ast.parse(open('$TARGET').read())" 2>/dev/null; then
+        echo "  OK  benchmarks/humaneval/humaneval_adapter.py"
+        return 0
+    fi
+    echo "  FAIL benchmarks/humaneval/humaneval_adapter.py"
+    return 1
+}
+
+case "$CMD" in
+install)
+    echo "Target: $TARGET"
+    echo ""
+
+    if [ ! -f "$TARGET" ]; then
+        echo "  ✗ [ERROR] 目标文件不存在: $TARGET"
+        echo "           evalscope 版本可能不是 1.8.1, 请人工核对 humaneval_adapter.py 路径"
+        exit 1
+    fi
+
+    if diff -q "$NEW" "$TARGET" >/dev/null 2>&1; then
+        echo "  ⊘ [SKIP] humaneval_adapter.py → 已是最新版本, 跳过 (已应用过)"
+    else
+        # 校验目标是否为未修改的 1.8.1 原版 (避免在已被其它改动污染的文件上盲目覆盖)
+        if [ -f "$PATCH_DIR/humaneval_adapter.py.orig" ]; then
+            if ! diff -q "$PATCH_DIR/humaneval_adapter.py.orig" "$TARGET" >/dev/null 2>&1; then
+                echo "  ⚠ [WARN] 目标文件与 1.8.1 原版不一致 (可能已被手动改过或 evalscope 版本不同)"
+                echo "          将备份当前版本为 .bak.prepatch 后覆盖. 请确认改动可接受."
+                cp "$TARGET" "${TARGET}.bak.prepatch"
+            else
+                cp "$TARGET" "$BAK"
+            fi
+        else
+            cp "$TARGET" "$BAK"
+        fi
+        cp "$NEW" "$TARGET"
+        echo "  ✓ [MODIFY] humaneval_adapter.py → $TARGET"
+    fi
+
+    clean_pyc
+
+    if check_syntax; then
+        echo ""
+        echo "=== Patch applied successfully ==="
+        echo "原文件已备份为 .bak. 回滚: bash $0 revert"
+    else
+        echo ""
+        echo "=== [ERROR] 语法检查失败, 已自动回滚 ==="
+        if [ -f "$BAK" ]; then cp "$BAK" "$TARGET"; fi
+        exit 1
+    fi
+    ;;
+revert)
+    if [ ! -f "$BAK" ]; then
+        echo "[WARN] 未找到备份 .bak ($BAK)"
+        echo "       若从未应用过 patch 则无需回滚; 若是 .bak.prepatch, 请手动核对."
+        exit 0
+    fi
+
+    cp "$BAK" "$TARGET"
+    echo "  ✓ [REVERT] humaneval_adapter.py 已从 .bak 恢复"
+
+    clean_pyc
+
+    if check_syntax; then
+        echo "=== Revert OK ==="
+    else
+        echo "=== [ERROR] 回滚后语法检查失败, 请检查 $TARGET ==="
+        exit 1
+    fi
+    ;;
+*)
+    echo "用法: bash $0 {install|revert}"
+    echo "  install  应用 patch (默认)"
+    echo "  revert   从 .bak 回滚"
+    exit 1
+    ;;
+esac

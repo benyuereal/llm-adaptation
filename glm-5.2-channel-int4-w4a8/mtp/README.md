@@ -44,15 +44,14 @@ export VLLM_DEQUANT_ATTN=1   # 开启 attention int8 -> bf16 dequant
 mtp/
 ├── apply_patch.sh              # 一键应用 patch（整文件覆盖，幂等，.bak 备份）
 ├── revert_patch.sh             # 从 .bak 回滚
-├── run_mtp_dequant_attn.sh     # 启动脚本（已内置 export VLLM_DEQUANT_ATTN=1）
+├── mtp_start.sh                # 启动脚本（已内置 export VLLM_DEQUANT_ATTN=1）
 ├── bench_mtp.py                # 吞吐 + 接受长度 benchmark
 ├── vllm_patches/
 │   ├── modified/slimquant_w4a8.py   # 改后整文件（apply 用）
 │   └── slimquant_w4a8.patch         # unified diff（参考/审阅用）
 └── logs/
     ├── profile_baseline_int8.txt    # baseline profile（int8 GEMM 60.49%）
-    ├── profile_dequant_attn.txt     # dequant 后 profile
-    └── mtp_dequant_attn_serve.log   # 服务启动日志
+    └── profile_dequant_attn.txt     # dequant 后 profile
 ```
 
 ## 使用方法
@@ -78,7 +77,7 @@ bash /data1/csy/llm-adaptation/glm-5.2-channel-int4-w4a8/mtp/revert_patch.sh
 ### 3. 启动服务
 
 ```bash
-bash /data1/csy/llm-adaptation/glm-5.2-channel-int4-w4a8/mtp/run_mtp_dequant_attn.sh
+bash /data1/csy/llm-adaptation/glm-5.2-channel-int4-w4a8/mtp/mtp_start.sh
 ```
 
 与 champion baseline 配置一致（TP=8、MTP num_spec=4、max-model-len 32768 等），

@@ -141,7 +141,7 @@ VLLM_W8A8_BACKEND 强制=1       # gfx928 上 Linear 走 triton_scaled_mm
 
 **根因**：evalscope 1.8.1 的 `humaneval_adapter._postprocess` 一律取首个 markdown 代码块（`blocks[0]`）。思考模式下模型常输出多个代码块（探索性草稿 + 最终实现，偶有 batch 串扰），取 `blocks[0]` 会取到草稿/错题代码 → pass@1 虚低。
 
-**修复**（`evalscope_patches/humaneval_adapter.py`，非侵入）：
+**修复**（`evalscope/humaneval_adapter.py`，非侵入）：
 1. prompt 引导模型把最终实现放在最后一个 ` ```python ` 代码块
 2. `_postprocess` 优先取「最后一个定义了目标 `entry_point` 函数」的代码块，找不到回退到最后一个块
 
@@ -327,8 +327,8 @@ dequant 是数学精确的权重还原 + 更高精度激活，理论上不应影
 ```bash
 # 应用 patch（幂等，备份 .bak）
 bash mtp/apply_patch.sh
-# 启动（run_mtp_dequant_attn.sh 已含 export VLLM_DEQUANT_ATTN=1）
-bash mtp/run_mtp_dequant_attn.sh
+# 启动（mtp_start.sh 已含 export VLLM_DEQUANT_ATTN=1）
+bash mtp/mtp_start.sh
 # 验证吞吐
 python3 mtp/bench_mtp.py 1 2 512
 # 回滚
@@ -384,20 +384,19 @@ dequant-attn 落地后，profile 显示新瓶颈分布为：bf16 GEMM（Cijk/roc
 | `vllm_patches/modified/mla.py` | skip_topk 参数，shared 复用 buffer | 长输入 Bug 1 |
 | `vllm_patches/modified/flashmla_sparse.py` | shared 层 indexer=None 透传 | 长输入 Bug 1 |
 | `vllm_patches/modified/indexer.py` | rocm 分支 scheduler_metadata 占位 | 启动崩溃 |
-| `evalscope_patches/humaneval_adapter.py` | entry_point 代码块提取修复 | HumanEval 问题 2 |
+| `evalscope/humaneval_adapter.py` | entry_point 代码块提取修复 | HumanEval 问题 2 |
 | `apply_patch.sh` | vllm patch 应用（检测已应用则跳过） | — |
-| `evalscope_apply_patch.sh` / `evalscope_revert_patch.sh` | evalscope patch 应用/回滚 | — |
+| `evalscope/evalscope_patch.sh` | evalscope patch 应用（install）/回滚（revert） | — |
 | `start.sh` | 性能模式启动脚本 | 部署 |
 | `mtp/vllm_patches/slimquant_w4a8.patch` | dequant-attn patch（attention int8→bf16） | 性能优化 5.5 |
 | `mtp/apply_patch.sh` / `mtp/revert_patch.sh` | dequant-attn patch 应用/回滚 | 性能优化 5.5 |
-| `mtp/run_mtp_dequant_attn.sh` | dequant-attn 启动脚本（含 `VLLM_DEQUANT_ATTN=1`） | 性能优化 5.5 |
+| `mtp/mtp_start.sh` | dequant-attn 启动脚本（含 `VLLM_DEQUANT_ATTN=1`） | 性能优化 5.5 |
 | `mtp/bench_mtp.py` | MTP 吞吐/接受长度 benchmark | 性能优化 5.5 |
 | `mtp/README.md` | dequant-attn 优化说明 | 性能优化 5.5 |
 
 ## 附录 B：相关文档
 - [`glm52-long-input-garbage-rootcause.md`](glm52-long-input-garbage-rootcause.md) — 长输入乱码完整排查现场
 - [`glm52-humaneval-precision-rootcause.md`](glm52-humaneval-precision-rootcause.md) — HumanEval 精度四层问题根因
-- [`GLM-5.2-DCU适配度技术文档.md`](GLM-5.2-DCU适配度技术文档.md) — 性能优化探索专题（tile tuning）
 
 ## 附录 C：排查方法学（可复用）
 1. **无 HF 基线时用数值打印**：量化模型 transformers 不支持，改用逐算子打印 mean/std/absmax 找第一个异常

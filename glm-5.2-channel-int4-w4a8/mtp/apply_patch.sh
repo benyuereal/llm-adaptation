@@ -18,7 +18,7 @@
 #       显存 +3.59GB/rank.
 #
 # 注意: patch 本身不改变默认行为, 需启动时 export VLLM_DEQUANT_ATTN=1
-#       (run_mtp_dequant_attn.sh 已内置).
+#       (mtp_start.sh 已内置).
 set -euo pipefail
 
 VLLM_ROOT=$(python3 -c "import vllm, os; print(os.path.dirname(vllm.__file__))" 2>/dev/null)
@@ -76,7 +76,7 @@ if [ $ERR -eq 0 ]; then
     echo ""
     echo "=== Patch applied successfully ==="
     echo "原文件已备份为 .bak. 回滚: bash $SCRIPT_DIR/revert_patch.sh"
-    echo "启动服务: bash $SCRIPT_DIR/run_mtp_dequant_attn.sh"
+    echo "启动服务: bash $SCRIPT_DIR/mtp_start.sh"
 else
     echo ""
     echo "=== [ERROR] 语法检查失败 ==="

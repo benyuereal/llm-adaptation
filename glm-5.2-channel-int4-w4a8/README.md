@@ -78,12 +78,12 @@ bash glm-5.2-channel-int4-w4a8/apply_patch.sh
 
 ```bash
 # 应用 (幂等: 已修复则跳过)
-bash glm-5.2-channel-int4-w4a8/evalscope_apply_patch.sh
+bash glm-5.2-channel-int4-w4a8/evalscope/evalscope_patch.sh install
 # 回滚
-bash glm-5.2-channel-int4-w4a8/evalscope_revert_patch.sh
+bash glm-5.2-channel-int4-w4a8/evalscope/evalscope_patch.sh revert
 ```
 
-`evalscope_apply_patch.sh` 会:自动定位 evalscope 安装路径 → 备份
+`evalscope_patch.sh install` 会:自动定位 evalscope 安装路径 → 备份
 `humaneval_adapter.py` 为 `.bak` → 覆盖为修复版 → 语法检查 → 清理 `__pycache__`。
 非侵入:不改 evalscope 其它文件;不应用也不影响模型推理,仅思考模式下 HumanEval
 提取偶发取错代码块。
@@ -222,12 +222,11 @@ glm-5.2-channel-int4-w4a8/
 │       ├── mqa_logits.py
 │       ├── paged_mqa_logits.py
 │       └── sparse_mla_fwd.py
-├── evalscope_apply_patch.sh   # 一键应用 evalscope HumanEval 提取修复 (可选)
-├── evalscope_revert_patch.sh  # 回滚 evalscope HumanEval 提取修复
-├── evalscope_patches/
-│   ├── humaneval_adapter.py       # 修复版 (entry_point 提取)
+├── evalscope/                 # evalscope HumanEval 提取修复 (可选)
+│   ├── evalscope_patch.sh       # 一键 install/revert
+│   ├── humaneval_adapter.py     # 修复版 (entry_point 提取)
 │   ├── humaneval_adapter.py.orig  # evalscope 1.8.1 原版 (对照基准)
-│   └── humaneval_adapter.patch    # unified diff
+│   └── humaneval_adapter.patch  # unified diff
 ├── docs/                      # 详细文档
 │   ├── glm52-long-input-garbage-rootcause.md    # 长输入乱码完整根因分析
 │   └── glm52-humaneval-precision-rootcause.md   # HumanEval 精度排查根因分析

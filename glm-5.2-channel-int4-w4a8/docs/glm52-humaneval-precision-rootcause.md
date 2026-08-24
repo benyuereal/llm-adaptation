@@ -49,7 +49,7 @@ GLM-5.2 的 chat_template 在 `enable_thinking=false` 时，prompt 末尾追加�
 **典型案例**：`#14`（all_prefixes）模型输出混入了相邻题 `rolling_max` 的代码块，
 `blocks[0]` 取到 `rolling_max`，提取出错误函数。
 
-**修复**（`evalscope_patches/humaneval_adapter.py`，非侵入，仅改此文件）：
+**修复**（`evalscope/humaneval_adapter.py`，非侵入，仅改此文件）：
 1. prompt 引导模型把最终实现放在最后一个 ` ```python ` 代码块
 2. `_postprocess` 优先取「最后一个定义了目标 `entry_point` 函数」的代码块，找不到
    则回退到最后一个块（而非第一个）
@@ -88,8 +88,8 @@ evalscope eval \
 
 **应用 evalscope 提取修复**（见问题 3，建议应用）：
 ```bash
-bash glm-5.2-channel-int4-w4a8/evalscope_apply_patch.sh   # 应用
-bash glm-5.2-channel-int4-w4a8/evalscope_revert_patch.sh  # 回滚
+bash glm-5.2-channel-int4-w4a8/evalscope/evalscope_patch.sh install   # 应用
+bash glm-5.2-channel-int4-w4a8/evalscope/evalscope_patch.sh revert    # 回滚
 ```
 
 **注意**：evalscope humaneval adapter 强制用 ChatMessageUser（走 chat），改 api-url 到
@@ -106,8 +106,8 @@ bash glm-5.2-channel-int4-w4a8/evalscope_revert_patch.sh  # 回滚
 ## 五、相关文件
 
 - vllm 修复：`vllm_patches/modified/sparse_attn_indexer.py`（topk 清洗，问题 1）
-- evalscope 修复：`evalscope_patches/humaneval_adapter.py`（entry_point 提取，问题 3）
-  - 应用：`evalscope_apply_patch.sh` / 回滚：`evalscope_revert_patch.sh`
+- evalscope 修复：`evalscope/humaneval_adapter.py`（entry_point 提取，问题 3）
+  - 应用：`evalscope/evalscope_patch.sh install` / 回滚：`evalscope/evalscope_patch.sh revert`
 - 启动：`start.sh`（性能模式，CUDA graph + MTP）
 - 部署：`apply_patch.sh`（vllm patch，检测已应用则跳过）
 - 精度测试：`test/test_mqa_logits_precision.py`（mqa_logits vs aiter 对比）
