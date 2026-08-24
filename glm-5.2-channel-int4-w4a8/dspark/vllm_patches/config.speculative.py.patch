@@ -1,0 +1,52 @@
+--- a/vllm/config/speculative.py
++++ b/vllm/config/speculative.py
+@@ -44,6 +44,9 @@
+     "step3p5_mtp",
+ ]
+ EagleModelTypes = Literal["eagle", "eagle3", MTPModelTypes]
++# Backported: DSpark/DFlash parallel-drafting speculators.
++DFlashModelTypes = Literal["dflash"]
++DSparkModelTypes = Literal["dspark"]
+ SpeculativeMethod = Literal[
+     "ngram",
+     "medusa",
+@@ -51,6 +54,8 @@
+     "draft_model",
+     "suffix",
+     EagleModelTypes,
++    DFlashModelTypes,
++    DSparkModelTypes,
+ ]
+ 
+ 
+@@ -176,7 +181,7 @@
+     @staticmethod
+     def hf_config_override(hf_config: PretrainedConfig) -> PretrainedConfig:
+         initial_architecture = hf_config.architectures[0]
+-        if hf_config.model_type in ("deepseek_v3", "deepseek_v32"):
++        if hf_config.model_type in ("deepseek_v3", "deepseek_v32", "glm_moe_dsa"):
+             hf_config.model_type = "deepseek_mtp"
+         if hf_config.model_type == "deepseek_mtp":
+             n_predict = getattr(hf_config, "num_nextn_predict_layers", None)
+@@ -383,7 +388,7 @@
+                 )
+ 
+                 # Automatically detect the method
+-                if self.method in ("eagle", "eagle3"):
++                if self.method in ("eagle", "eagle3", "dflash", "dspark"):
+                     pass
+                 # examples:
+                 # yuhuili/EAGLE-LLaMA3-Instruct-8B
+@@ -716,6 +721,12 @@
+     def use_eagle(self) -> bool:
+         return self.method in ("eagle", "eagle3", "mtp")
+ 
++    def use_dflash(self) -> bool:
++        return self.method == "dflash"
++
++    def use_dspark(self) -> bool:
++        return self.method == "dspark"
++
+     def uses_draft_model(self) -> bool:
+         return self.method == "draft_model"
+ 

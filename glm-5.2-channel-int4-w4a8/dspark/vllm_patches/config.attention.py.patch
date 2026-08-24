@@ -1,0 +1,27 @@
+--- a/vllm/config/attention.py
++++ b/vllm/config/attention.py
+@@ -29,6 +29,11 @@
+     flash_attn_max_num_splits_for_cuda_graph: int = 32
+     """Flash Attention max number splits for cuda graph decode."""
+ 
++    tq_max_kv_splits_for_cuda_graph: int = 32
++    """TurboQuant max NUM_KV_SPLITS for cuda graph decode.
++    Fixes the split count so grid dimensions are constant across captures,
++    and buffers can be pre-allocated to avoid inflating the memory estimate."""
++
+     use_cudnn_prefill: bool = False
+     """Whether to use cudnn prefill."""
+ 
+@@ -44,6 +49,12 @@
+ 
+     disable_flashinfer_q_quantization: bool = False
+     """If set, when using fp8 kv, do not quantize Q to fp8."""
++
++    use_non_causal: bool = False
++    """Backported: whether the model uses non-causal attention (e.g. DFlash/
++    DSpark drafters with non-causal layers). DSpark's sliding-attention draft
++    is causal, so this stays False for our checkpoint, but the field must exist
++    for load_dspark_model to set it via replace()."""
+ 
+     def compute_hash(self) -> str:
+         """

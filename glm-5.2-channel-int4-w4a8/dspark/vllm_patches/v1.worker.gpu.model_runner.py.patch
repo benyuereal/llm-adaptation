@@ -1,0 +1,250 @@
+--- a/vllm/v1/worker/gpu/model_runner.py
++++ b/vllm/v1/worker/gpu/model_runner.py
+@@ -20,7 +20,7 @@
+ from vllm.utils.torch_utils import STR_DTYPE_TO_TORCH_DTYPE
+ from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
+ from vllm.v1.kv_cache_interface import KVCacheConfig
+-from vllm.v1.outputs import ModelRunnerOutput
++from vllm.v1.outputs import DraftTokenIds, ModelRunnerOutput
+ from vllm.v1.worker.gpu.async_utils import AsyncOutput
+ from vllm.v1.worker.gpu.attn_utils import (
+     build_attn_metadata,
+@@ -134,10 +134,18 @@
+             self.do_spec_decode = True
+             self.num_speculative_steps = self.speculative_config.num_speculative_tokens
+             self.speculator = init_speculator(self.vllm_config, self.device)
++            # Backported: DSpark/DFlash/EAGLE3 drafters consume intermediate
++            # target layer outputs as auxiliary hidden states. When enabled,
++            # the target model's forward returns (hidden_states, aux_hidden_states)
++            # and execute_model/propose_draft thread the aux list through.
++            self.use_aux_hidden_state_outputs = (
++                self.speculative_config.method in ("dspark", "dflash", "eagle3")
++            )
+         else:
+             self.do_spec_decode = False
+             self.num_speculative_steps = 0
+             self.speculator = None
++            self.use_aux_hidden_state_outputs = False
+ 
+         self.req_states = RequestState(
+             max_num_reqs=self.max_num_reqs,
+@@ -147,6 +155,14 @@
+             vocab_size=self.vocab_size,
+             device=self.device,
+         )
++        # Backported: the engine's post_step pulls the draft tokens proposed in
++        # the last sample_tokens() via take_draft_token_ids() (used by the
++        # scheduler to feed spec_token_ids for the next step). The standalone
++        # runner stores proposed drafts in req_states.draft_tokens (GPU,
++        # indexed by req index); remember the req_ids/indices of the last batch
++        # so take_draft_token_ids can read them back.
++        self._last_draft_req_ids: list[str] | None = None
++        self._last_draft_idx_mapping: torch.Tensor | None = None
+         self.input_buffers = InputBuffers(
+             max_num_reqs=self.max_num_reqs,
+             max_num_tokens=self.max_num_tokens,
+@@ -204,6 +220,26 @@
+                 )
+             if self.do_spec_decode:
+                 self.speculator.load_model(self.model)
++                # Backported: DSpark/DFlash/EAGLE3 drafters consume intermediate
++                # target layer outputs as auxiliary hidden states. Configure the
++                # target model to collect them at the layers named by the draft
++                # config (e.g. dspark aux_hidden_state_layer_ids). The V1 runner
++                # does this in its own load path; the V2 runner needs it too.
++                if self.use_aux_hidden_state_outputs:
++                    from vllm.model_executor.models.interfaces import supports_eagle3
++                    from vllm.v1.worker.gpu.spec_decode.eagle3_utils import (
++                        set_eagle3_aux_hidden_state_layers,
++                    )
++
++                    if not supports_eagle3(self.model):
++                        raise RuntimeError(
++                            "Model does not support EAGLE3 interface but "
++                            "aux_hidden_state_outputs was requested for "
++                            f"speculative method {self.speculative_config.method}."
++                        )
++                    set_eagle3_aux_hidden_state_layers(
++                        self.model, self.speculative_config
++                    )
+         time_after_load = time.perf_counter()
+ 
+         self.model_memory_usage = m.consumed_memory
+@@ -223,7 +259,19 @@
+         return self.model
+ 
+     def get_kv_cache_spec(self):
+-        return get_kv_cache_spec(self.vllm_config)
++        spec = get_kv_cache_spec(self.vllm_config)
++        # Backported: the DSpark draft's attention layers are part of the same
++        # vllm_config (draft layers are indexed past the target's layer count),
++        # so get_kv_cache_spec returns specs for both target and draft. With
++        # --disable-hybrid-kv-cache-manager the draft's SlidingWindowSpec is
++        # converted to FullAttentionSpec, letting target (MLA attn + DSA
++        # indexer) and draft share one UniformTypeKVCacheSpecs group. The
++        # per-attn-subgroup metadata builders (init_attn_backend) then give each
++        # backend its own metadata, and _reshape_kv_cache sizes each layer's KV
++        # tensor by its own page size. So we keep the draft layers in the spec
++        # and let the unified group allocate a dedicated KV tensor per draft
++        # layer.
++        return spec
+ 
+     def initialize_kv_cache(self, kv_cache_config: KVCacheConfig) -> None:
+         kv_cache_config = deepcopy(kv_cache_config)
+@@ -241,7 +289,7 @@
+             device=self.device,
+         )
+ 
+-        self.attn_backends, self.attn_metadata_builders = init_attn_backend(
++        self.attn_backends, self.attn_groups = init_attn_backend(
+             self.kv_cache_config,
+             self.vllm_config,
+             self.device,
+@@ -250,7 +298,7 @@
+             # HACK(woosuk)
+             self.speculator.set_attn(
+                 self.kv_cache_config,
+-                self.attn_metadata_builders,
++                self.attn_groups,
+                 self.block_tables,
+             )
+ 
+@@ -264,9 +312,6 @@
+         )
+         self.kv_connector = get_kv_connector(self.vllm_config, kv_caches_dict)
+ 
+-        # Attention groups are not supported.
+-        self.attn_groups = []  # type: ignore
+-
+     def prepare_dummy_attn_metadata(self, input_batch: InputBatch) -> None:
+         block_tables = self.block_tables.get_dummy_block_tables(input_batch.num_reqs)
+         slot_mappings = self.block_tables.get_dummy_slot_mappings(
+@@ -276,7 +321,7 @@
+             slot_mappings, self.kv_cache_config
+         )
+         attn_metadata = build_attn_metadata(
+-            attn_metadata_builders=self.attn_metadata_builders,
++            attn_groups=self.attn_groups,
+             num_reqs=input_batch.num_reqs,
+             num_tokens=input_batch.num_tokens,
+             query_start_loc_gpu=input_batch.query_start_loc,
+@@ -319,7 +364,7 @@
+         )
+         self.kv_connector.set_disabled(False)
+         assert self.execute_model_state is not None
+-        hidden_states, input_batch, _ = self.execute_model_state
++        hidden_states, input_batch, _, _ = self.execute_model_state
+         sample_hidden_states = hidden_states[input_batch.logits_indices]
+         return hidden_states, sample_hidden_states
+ 
+@@ -393,7 +438,7 @@
+                 mrope_positions=mrope_positions,
+                 inputs_embeds=inputs_embeds,
+                 block_tables=self.block_tables,
+-                attn_metadata_builders=self.attn_metadata_builders,
++                attn_groups=self.attn_groups,
+                 kv_cache_config=self.kv_cache_config,
+             )
+             if self.do_spec_decode:
+@@ -631,7 +676,7 @@
+ 
+         # Layer name -> attention metadata.
+         attn_metadata = build_attn_metadata(
+-            attn_metadata_builders=self.attn_metadata_builders,
++            attn_groups=self.attn_groups,
+             num_reqs=num_reqs,
+             num_tokens=num_tokens,
+             query_start_loc_gpu=query_start_loc,
+@@ -887,7 +932,7 @@
+             # NOTE(woosuk): Here, we don't need to pass the input tensors,
+             # because they are already copied to the CUDA graph input buffers.
+             self.kv_connector.pre_forward(scheduler_output)
+-            hidden_states = self.cudagraph_manager.run(
++            model_output = self.cudagraph_manager.run(
+                 input_batch.num_tokens_after_padding
+             )
+         else:
+@@ -906,14 +951,27 @@
+                 slot_mapping=input_batch.slot_mappings,
+             ):
+                 self.kv_connector.pre_forward(scheduler_output)
+-                hidden_states = self.model(
++                model_output = self.model(
+                     input_ids=input_batch.input_ids,
+                     positions=positions,
+                     inputs_embeds=input_batch.inputs_embeds,
+                 )
+ 
++        # Backported: split auxiliary hidden states when the target model
++        # returns a (hidden_states, aux_hidden_states) tuple for DSpark/DFlash.
++        if self.use_aux_hidden_state_outputs and isinstance(model_output, tuple):
++            hidden_states, aux_hidden_states = model_output
++        else:
++            hidden_states = model_output
++            aux_hidden_states = None
++
+         kv_connector_output = self.kv_connector.post_forward(scheduler_output)
+-        self.execute_model_state = hidden_states, input_batch, kv_connector_output
++        self.execute_model_state = (
++            hidden_states,
++            input_batch,
++            kv_connector_output,
++            aux_hidden_states,
++        )
+         return None
+ 
+     @torch.inference_mode()
+@@ -922,7 +980,9 @@
+         grammar_output: GrammarOutput | None,
+     ) -> AsyncOutput | ModelRunnerOutput:
+         assert self.execute_model_state is not None
+-        hidden_states, input_batch, kv_connector_output = self.execute_model_state
++        hidden_states, input_batch, kv_connector_output, aux_hidden_states = (
++            self.execute_model_state
++        )
+         self.execute_model_state = None  # type: ignore
+ 
+         sampler_output, num_sampled, num_rejected = self.sample(
+@@ -969,12 +1029,41 @@
+             draft_tokens = self.propose_draft(
+                 input_batch,
+                 hidden_states,
+-                None,  # aux_hidden_states
++                aux_hidden_states,  # backported: thread aux hidden states
+                 num_sampled,
+                 num_rejected,
+             )
+             self.req_states.draft_tokens[input_batch.idx_mapping] = draft_tokens
++            # Remember this batch's req_ids / indices so the engine can pull
++            # the proposed draft tokens via take_draft_token_ids().
++            self._last_draft_req_ids = list(input_batch.req_ids)
++            self._last_draft_idx_mapping = input_batch.idx_mapping
+ 
+         if self.use_async_scheduling:
+             return async_output
+         return async_output.get_output()
++
++    def take_draft_token_ids(self) -> DraftTokenIds | None:
++        # Backported: engine post_step calls this (when not async scheduling)
++        # to feed the scheduler's spec_token_ids for the next step. The
++        # standalone runner tracks proposed drafts in req_states.draft_tokens
++        # (GPU, [max_num_reqs, num_speculative_steps]); copy the rows for the
++        # last batch to CPU and pair them with the req_ids.
++        if (
++            not self.do_spec_decode
++            or self._last_draft_req_ids is None
++            or self._last_draft_idx_mapping is None
++        ):
++            return None
++        req_ids = self._last_draft_req_ids
++        idx_mapping = self._last_draft_idx_mapping
++        # Only the first len(req_ids) rows are valid.
++        num_reqs = len(req_ids)
++        idx = idx_mapping[:num_reqs]
++        # Synchronize to ensure the propose() write is visible before the copy.
++        torch.cuda.current_stream().synchronize()
++        draft_tokens_cpu = self.req_states.draft_tokens[idx].to(
++            "cpu", non_blocking=False
++        )
++        draft_token_ids = draft_tokens_cpu.tolist()
++        return DraftTokenIds(req_ids=req_ids, draft_token_ids=draft_token_ids)

@@ -1,0 +1,19 @@
+--- a/vllm/v1/worker/gpu_worker.py
++++ b/vllm/v1/worker/gpu_worker.py
+@@ -105,7 +105,15 @@
+         else:
+             self.profiler = None
+ 
+-        self.use_v2_model_runner = envs.VLLM_USE_V2_MODEL_RUNNER
++        if "VLLM_USE_V2_MODEL_RUNNER" in os.environ:
++            self.use_v2_model_runner = envs.VLLM_USE_V2_MODEL_RUNNER
++        else:
++            # Backported: honor the VllmConfig.use_v2_model_runner property
++            # (e.g. DSpark forces V2). Falls back to False to preserve the
++            # preinstalled default behavior when the config does not opt in.
++            self.use_v2_model_runner = getattr(
++                self.vllm_config, "use_v2_model_runner", False
++            )
+ 
+     def sleep(self, level: int = 1) -> None:
+         from vllm.device_allocator.cumem import CuMemAllocator

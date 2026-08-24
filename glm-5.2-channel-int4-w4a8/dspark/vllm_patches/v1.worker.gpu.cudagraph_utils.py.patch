@@ -1,0 +1,155 @@
+--- a/vllm/v1/worker/gpu/cudagraph_utils.py
++++ b/vllm/v1/worker/gpu/cudagraph_utils.py
+@@ -12,7 +12,6 @@
+ from vllm.config.compilation import CUDAGraphMode
+ from vllm.distributed.parallel_state import graph_capture, is_global_first_rank
+ from vllm.forward_context import set_forward_context
+-from vllm.v1.attention.backend import AttentionMetadataBuilder
+ from vllm.v1.kv_cache_interface import KVCacheConfig
+ from vllm.v1.worker.gpu.attn_utils import (
+     build_attn_metadata,
+@@ -21,6 +20,7 @@
+ from vllm.v1.worker.gpu.block_table import BlockTables
+ from vllm.v1.worker.gpu.dp_utils import make_num_tokens_across_dp
+ from vllm.v1.worker.gpu.input_batch import InputBuffers
++from vllm.v1.worker.utils import AttentionGroup
+ 
+ 
+ class CudaGraphManager:
+@@ -56,6 +56,13 @@
+         self.graphs: dict[int, torch.cuda.CUDAGraph] = {}
+         self.pool = torch.cuda.graph_pool_handle()
+         self.hidden_states: torch.Tensor | None = None
++        # Backported: DSpark/DFlash/EAGLE3 target models return a
++        # (hidden_states, aux_hidden_states) tuple where aux_hidden_states is a
++        # list of per-aux-layer tensors. To flow aux through CUDA graph mode
++        # (otherwise the captured graph discards it and the drafter falls back
++        # to last_hidden_states, hurting acceptance), persist one buffer per
++        # aux layer sized to max_num_tokens. Allocated lazily on first capture.
++        self.aux_hidden_states: list[torch.Tensor] | None = None
+ 
+     def needs_capture(self) -> bool:
+         return len(self.cudagraph_sizes) > 0
+@@ -80,7 +87,7 @@
+         mrope_positions: torch.Tensor | None,
+         inputs_embeds: torch.Tensor | None,
+         block_tables: BlockTables,
+-        attn_metadata_builders: list[AttentionMetadataBuilder],
++        attn_groups: list[list[AttentionGroup]],
+         kv_cache_config: KVCacheConfig,
+     ) -> None:
+         num_reqs = min(num_tokens, self.max_num_reqs)
+@@ -96,7 +103,7 @@
+             num_tokens,
+             input_buffers,
+             block_tables,
+-            attn_metadata_builders,
++            attn_groups,
+             self.max_model_len,
+             kv_cache_config,
+         )
+@@ -116,8 +123,30 @@
+                 positions=positions,
+                 inputs_embeds=inputs_embeds,
+             )
++            # Backported: DSpark/DFlash/EAGLE3 target models return a
++            # (hidden_states, aux_hidden_states) tuple when collecting
++            # auxiliary hidden states. Persist per-aux-layer buffers (sized to
++            # max_num_tokens) so aux flows through graph replay; the drafter
++            # then receives the correct aux layers instead of falling back to
++            # last_hidden_states.
++            aux_hidden_states: list[torch.Tensor] | None = None
++            if isinstance(hidden_states, tuple):
++                hidden_states, aux_hidden_states = hidden_states
+             if self.hidden_states is None:
+                 self.hidden_states = torch.empty_like(hidden_states)
++            if (
++                aux_hidden_states is not None
++                and self.aux_hidden_states is None
++            ):
++                self.aux_hidden_states = [
++                    torch.empty(
++                        self.max_num_tokens,
++                        t.shape[-1],
++                        dtype=t.dtype,
++                        device=t.device,
++                    )
++                    for t in aux_hidden_states
++                ]
+ 
+         # Capture the graph.
+         assert num_tokens not in self.graphs
+@@ -138,7 +167,13 @@
+                 positions=positions,
+                 inputs_embeds=inputs_embeds,
+             )
++            aux_hidden_states = None
++            if isinstance(hidden_states, tuple):
++                hidden_states, aux_hidden_states = hidden_states
+             self.hidden_states[:num_tokens] = hidden_states
++            if aux_hidden_states is not None and self.aux_hidden_states is not None:
++                for buf, aux in zip(self.aux_hidden_states, aux_hidden_states):
++                    buf[:num_tokens] = aux
+         self.graphs[num_tokens] = graph
+ 
+     @torch.inference_mode()
+@@ -149,7 +184,7 @@
+         mrope_positions: torch.Tensor | None,
+         inputs_embeds: torch.Tensor | None,
+         block_tables: BlockTables,
+-        attn_metadata_builders: list[AttentionMetadataBuilder],
++        attn_groups: list[list[AttentionGroup]],
+         kv_cache_config: KVCacheConfig,
+     ) -> None:
+         capture_graphs(
+@@ -161,15 +196,22 @@
+             mrope_positions=mrope_positions,
+             inputs_embeds=inputs_embeds,
+             block_tables=block_tables,
+-            attn_metadata_builders=attn_metadata_builders,
++            attn_groups=attn_groups,
+             kv_cache_config=kv_cache_config,
+         )
+ 
+-    def run(self, num_tokens: int) -> torch.Tensor:
++    def run(self, num_tokens: int) -> torch.Tensor | tuple:
+         assert num_tokens in self.graphs
+         self.graphs[num_tokens].replay()
+         assert self.hidden_states is not None
+-        return self.hidden_states[:num_tokens]
++        hidden_states = self.hidden_states[:num_tokens]
++        # Backported: return the persisted aux hidden states alongside the
++        # final hidden states so the drafter gets the correct aux layers in
++        # CUDA graph mode.
++        if self.aux_hidden_states is not None:
++            aux_hidden_states = [buf[:num_tokens] for buf in self.aux_hidden_states]
++            return hidden_states, aux_hidden_states
++        return hidden_states
+ 
+ 
+ def get_cudagraph_sizes(
+@@ -246,7 +288,7 @@
+     num_tokens: int,
+     input_buffers: InputBuffers,
+     block_tables: BlockTables,
+-    attn_metadata_builders: list[AttentionMetadataBuilder],
++    attn_groups: list[list[AttentionGroup]],
+     max_model_len: int,
+     kv_cache_config: KVCacheConfig,
+ ) -> tuple[dict[str, Any], dict[str, torch.Tensor]]:
+@@ -271,7 +313,7 @@
+     )
+ 
+     attn_metadata = build_attn_metadata(
+-        attn_metadata_builders=attn_metadata_builders,
++        attn_groups=attn_groups,
+         num_reqs=num_reqs,
+         num_tokens=num_tokens,
+         query_start_loc_gpu=query_start_loc,
+@@ -281,5 +323,6 @@
+         block_tables=input_block_tables,
+         slot_mappings=slot_mappings,
+         kv_cache_config=kv_cache_config,
++        for_cudagraph_capture=True,
+     )
+     return attn_metadata, slot_mappings_by_layer

@@ -1,0 +1,84 @@
+--- a/vllm/config/vllm.py
++++ b/vllm/config/vllm.py
+@@ -350,6 +350,25 @@
+         return self.compilation_config.bs_to_padded_graph_size[batch_size]
+ 
+     @property
++    def use_v2_model_runner(self) -> bool:
++        """Whether to use the V2 GPU model runner.
++
++        Backported: DSpark is implemented only by the V2 GPU model runner and
++        cannot run on V1, so force V2 when method == "dspark". The env var
++        VLLM_USE_V2_MODEL_RUNNER takes precedence when explicitly set (it
++        defaults to False, so we check os.environ to distinguish an explicit
++        user choice from the default).
++        """
++        if "VLLM_USE_V2_MODEL_RUNNER" in os.environ:
++            return envs.VLLM_USE_V2_MODEL_RUNNER
++        if (
++            self.speculative_config is not None
++            and self.speculative_config.method == "dspark"
++        ):
++            return True
++        return False
++
++    @property
+     def needs_dp_coordinator(self) -> bool:
+         """
+         Determine if the DPCoordinator process is needed.
+@@ -559,11 +578,19 @@
+             )
+ 
+         executor_backend = self.parallel_config.distributed_executor_backend
+-        executor_supports_async_sched = executor_backend in (
+-            "mp",
+-            "uni",
+-            "external_launcher",
+-        )
++        if envs.VLLM_ENABLE_RAY_ASYNC_SCHEDULING:
++            executor_supports_async_sched = executor_backend in (
++                "mp",
++                "uni",
++                "external_launcher",
++                "ray"
++            )
++        else:
++            executor_supports_async_sched = executor_backend in (
++                "mp",
++                "uni",
++                "external_launcher"
++            )
+ 
+         if self.scheduler_config.async_scheduling:
+             # Async scheduling explicitly enabled, hard fail any incompatibilities.
+@@ -1053,6 +1080,12 @@
+         # Handle the KV connector configs
+         self._post_init_kv_transfer_config()
+ 
++        if self.parallel_config.enable_lightly_cp and not self.model_config.enforce_eager:
++            raise ValueError(
++                "Lightly context parallel currently only supports the eager mode!!!"
++            )
++        
++
+     def update_sizes_for_sequence_parallelism(self, possible_sizes: list) -> list:
+         # remove the sizes that not multiple of tp_size when
+         # enable sequence parallelism
+@@ -1157,9 +1190,14 @@
+                 # sort to make sure the sizes are in ascending order
+                 cudagraph_capture_sizes.sort()
+             else:
+-                cudagraph_capture_sizes = [
+-                    i for i in [1, 2, 4] if i <= max_cudagraph_capture_size
+-                ]
++                if not envs.VLLM_USE_CUDA_GRAPH_SIZES:
++                    cudagraph_capture_sizes = [
++                        i for i in [1, 2, 4] if i <= max_cudagraph_capture_size
++                    ]
++                else:
++                    cudagraph_capture_sizes = list(range(1, 25)) + [32] + [
++                            i for i in range(40, max_cudagraph_capture_size + 1, 8)
++                        ]
+                 if max_cudagraph_capture_size >= 8:
+                     # Step size 8 for small batch sizes, up to 256(not included)
+                     cudagraph_capture_sizes += list(

@@ -1,0 +1,32 @@
+--- a/vllm/config/utils.py
++++ b/vllm/config/utils.py
+@@ -10,7 +10,8 @@
+ import pathlib
+ import textwrap
+ from collections.abc import Callable, Iterable, Mapping, Sequence, Set
+-from dataclasses import MISSING, Field, dataclass, field, fields, is_dataclass, replace
++from dataclasses import MISSING, Field, dataclass, field, fields, is_dataclass
++from dataclasses import replace as _dataclass_replace
+ from itertools import pairwise
+ from typing import TYPE_CHECKING, Any, Protocol, TypeVar
+ 
+@@ -176,6 +177,19 @@
+     return next(f for f in fields(cls) if f.name == name).init
+ 
+ 
++def replace(dataclass_instance: ConfigT, /, **kwargs) -> ConfigT:
++    """Like ``dataclasses.replace``, but compatible with Pydantic dataclasses
++    which use ``pydantic.fields.Field`` instead of ``dataclasses.field``.
++
++    Backported from upstream vLLM for DFlash/DSpark draft-model loading.
++    """
++    cls = type(dataclass_instance)
++    dataclass_dict = dataclass_instance.__dict__
++    dataclass_dict = {k: v for k, v in dataclass_dict.items() if is_init_field(cls, k)}
++    dataclass_dict.update(kwargs)
++    return cls(**dataclass_dict)
++
++
+ @runtime_checkable
+ class SupportsHash(Protocol):
+     def compute_hash(self) -> str: ...

@@ -1,0 +1,30 @@
+--- a/vllm/model_executor/models/registry.py
++++ b/vllm/model_executor/models/registry.py
+@@ -113,6 +113,7 @@
+     "Glm4ForCausalLM": ("glm4", "Glm4ForCausalLM"),
+     "Glm4MoeForCausalLM": ("glm4_moe", "Glm4MoeForCausalLM"),
+     "Glm4MoeLiteForCausalLM": ("glm4_moe_lite", "Glm4MoeLiteForCausalLM"),
++    "GlmMoeDsaForCausalLM": ("deepseek_v2", "GlmMoeDsaForCausalLM"),
+     "GptOssForCausalLM": ("gpt_oss", "GptOssForCausalLM"),
+     "GPT2LMHeadModel": ("gpt2", "GPT2LMHeadModel"),
+     "GPTBigCodeForCausalLM": ("gpt_bigcode", "GPTBigCodeForCausalLM"),
+@@ -328,6 +329,10 @@
+         "granite_speech",
+         "GraniteSpeechForConditionalGeneration",
+     ),
++    "Qwen3ASRForConditionalGeneration": (
++        "qwen3_asr",
++        "Qwen3ASRForConditionalGeneration",
++    ),
+     "H2OVLChatModel": ("h2ovl", "H2OVLChatModel"),
+     "HunYuanVLForConditionalGeneration": (
+         "hunyuan_vision",
+@@ -490,6 +495,8 @@
+     "Step3p5MTP": ("step3p5_mtp", "Step3p5MTP"),
+     "Qwen3_5MTP": ("qwen3_5_mtp", "Qwen3_5MTP"),
+     "Qwen3_5MoeMTP": ("qwen3_5_mtp", "Qwen3_5MoeMTP"),
++    "Qwen3DSparkModel": ("qwen3_dspark", "Qwen3DSparkForCausalLM"),
++    "DFlashDraftModel": ("qwen3_dflash", "DFlashQwen3ForCausalLM"),
+     # Temporarily disabled.
+     # # TODO(woosuk): Re-enable this once the MLP Speculator is supported in V1.
+     # "MLPSpeculatorPreTrainedModel": ("mlp_speculator", "MLPSpeculator"),

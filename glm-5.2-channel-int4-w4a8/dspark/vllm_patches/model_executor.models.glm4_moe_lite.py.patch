@@ -1,0 +1,81 @@
+--- a/vllm/model_executor/models/glm4_moe_lite.py
++++ b/vllm/model_executor/models/glm4_moe_lite.py
+@@ -64,7 +64,7 @@
+ from vllm.platforms import current_platform
+ from vllm.sequence import IntermediateTensors
+ 
+-from .interfaces import SupportsLoRA, SupportsPP
++from .interfaces import SupportsEagle3, SupportsLoRA, SupportsPP
+ from .utils import (
+     AutoWeightsLoader,
+     PPMissingLayer,
+@@ -251,6 +251,11 @@
+             prefix=f"{prefix}.layers",
+         )
+ 
++        # Backported: auxiliary hidden state collection for speculative
++        # decoding drafters (EAGLE3 / DFlash / DSpark) that consume intermediate
++        # target layer outputs. Populated by set_aux_hidden_state_layers().
++        self.aux_hidden_state_layers: tuple[int, ...] = ()
++
+         if get_pp_group().is_last_rank:
+             self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+         else:
+@@ -280,7 +285,19 @@
+             hidden_states = intermediate_tensors["hidden_states"]
+             residual = intermediate_tensors["residual"]
+ 
+-        for layer in islice(self.layers, self.start_layer, self.end_layer):
++        aux_hidden_states: list[torch.Tensor] = []
++        for idx, layer in enumerate(
++            islice(self.layers, self.start_layer, self.end_layer),
++            start=self.start_layer,
++        ):
++            if idx in self.aux_hidden_state_layers:
++                # Collect the pre-layer residual stream (hidden_states + residual)
++                # as the auxiliary input for the drafter, matching EAGLE3/DFlash.
++                if residual is None:
++                    aux_hidden_state = hidden_states
++                else:
++                    aux_hidden_state = hidden_states + residual
++                aux_hidden_states.append(aux_hidden_state)
+             hidden_states, residual = layer(positions, hidden_states, residual)
+ 
+         if not get_pp_group().is_last_rank:
+@@ -288,7 +305,13 @@
+                 {"hidden_states": hidden_states, "residual": residual}
+             )
+ 
++        # The final layer's output is collected after the loop if requested.
++        if self.end_layer - 1 in self.aux_hidden_state_layers:
++            aux_hidden_states.append(hidden_states + residual)
++
+         hidden_states, _ = self.norm(hidden_states, residual)
++        if len(aux_hidden_states) > 0:
++            return hidden_states, aux_hidden_states
+         return hidden_states
+ 
+     def make_empty_intermediate_tensors(
+@@ -513,7 +536,7 @@
+ 
+ 
+ class Glm4MoeLiteForCausalLM(
+-    nn.Module, SupportsPP, SupportsLoRA, Glm4LiteMixtureOfExperts
++    nn.Module, SupportsPP, SupportsLoRA, SupportsEagle3, Glm4LiteMixtureOfExperts
+ ):
+     packed_modules_mapping = {
+         "gate_up_proj": ["gate_proj", "up_proj"],
+@@ -593,6 +616,13 @@
+ 
+     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
+         return self.model.embed_input_ids(input_ids)
++
++    def set_aux_hidden_state_layers(self, layers: tuple[int, ...]) -> None:
++        self.model.aux_hidden_state_layers = layers
++
++    def get_eagle3_aux_hidden_state_layers(self) -> tuple[int, ...]:
++        num_layers = len(self.model.layers)
++        return (2, num_layers // 2, num_layers - 3)
+ 
+     def forward(
+         self,

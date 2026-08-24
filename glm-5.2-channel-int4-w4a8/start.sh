@@ -18,8 +18,8 @@ LOG_DIR="/data1/csy/llm-adaptation/glm-5.2-channel-int4-w4a8/logs"
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/vllm_$(date +%Y%m%d_%H%M%S).log"
 
-VLLM_CMD=(vllm serve /models/GLM-5.2-Channel-INT4-w4a8 \
-    --trust-remote-code --dtype bfloat16 --max-model-len 16384 \
+VLLM_CMD=( vllm serve /models/GLM-5.2-Channel-INT4-w4a8 \
+    --trust-remote-code --dtype bfloat16 --max-model-len 56384 \
     --max-num-batched-tokens 8192 -tp 8 \
     --speculative_config '{"method": "mtp", "num_speculative_tokens": 3}' \
     --disable-custom-all-reduce --gpu-memory-utilization 0.92 \

@@ -10,12 +10,12 @@ export VLLM_DEQUANT_ATTN=1         # NEW: dequant all attention int8 linears -> 
 exec vllm serve /models/GLM-5.2-Channel-INT4-w4a8 \
   --trust-remote-code \
   --dtype bfloat16 \
-  --max-model-len 32768 \
+  --max-model-len 57344 \
   --max-num-batched-tokens 8192 \
   -tp 8 \
   --speculative_config '{"method": "mtp", "num_speculative_tokens": 4, "model": "/models/GLM-5.2-Channel-INT4-w4a8"}' \
   --disable-custom-all-reduce \
-  --gpu-memory-utilization 0.92 \
+  --gpu-memory-utilization 0.95 \
   --max-num-seqs 64 \
   --block-size 64 \
   --disable-hybrid-kv-cache-manager
