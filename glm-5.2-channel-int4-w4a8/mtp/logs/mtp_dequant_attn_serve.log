@@ -1,0 +1,479 @@
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:30:52 [utils.py:325] 
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:30:52 [utils.py:325]        █     █     █▄   ▄█
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:30:52 [utils.py:325]  ▄▄ ▄█ █     █     █ ▀▄▀ █  version 0.15.1
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:30:52 [utils.py:325]   █▄█▀ █     █     █     █  model   /models/GLM-5.2-Channel-INT4-w4a8
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:30:52 [utils.py:325]    ▀▀  ▀▀▀▀▀ ▀▀▀▀▀ ▀     ▀
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:30:52 [utils.py:325] 
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:30:52 [utils.py:261] non-default args: {'model_tag': '/models/GLM-5.2-Channel-INT4-w4a8', 'api_server_count': 1, 'model': '/models/GLM-5.2-Channel-INT4-w4a8', 'trust_remote_code': True, 'dtype': 'bfloat16', 'max_model_len': 32768, 'tensor_parallel_size': 8, 'disable_custom_all_reduce': True, 'gpu_memory_utilization': 0.92, 'max_num_batched_tokens': 8192, 'max_num_seqs': 64, 'disable_hybrid_kv_cache_manager': True, 'speculative_config': {'method': 'mtp', 'num_speculative_tokens': 4, 'model': '/models/GLM-5.2-Channel-INT4-w4a8'}}
+[0;36m(APIServer pid=1989844)[0;0m The argument `trust_remote_code` is to be used with Auto classes. It has no effect here and is ignored.
+[0;36m(APIServer pid=1989844)[0;0m The argument `trust_remote_code` is to be used with Auto classes. It has no effect here and is ignored.
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:30:52 [model.py:548] Resolved architecture: GlmMoeDsaForCausalLM
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:30:52 [model.py:1573] Using max model len 32768
+[0;36m(APIServer pid=1989844)[0;0m WARNING 08-24 10:30:52 [quark_ocp_mx.py:158] AITER is not found or QuarkOCP_MX is not supported on the current platform. QuarkOCP_MX quantization will not be available.
+[0;36m(APIServer pid=1989844)[0;0m The argument `trust_remote_code` is to be used with Auto classes. It has no effect here and is ignored.
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:30:52 [model.py:548] Resolved architecture: DeepSeekMTPModel
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:30:52 [model.py:1573] Using max model len 1048576
+[0;36m(APIServer pid=1989844)[0;0m WARNING 08-24 10:30:52 [speculative.py:410] Enabling num_speculative_tokens > 1 will runmultiple times of forward on same MTP layer,which may result in lower acceptance rate
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:30:52 [scheduler.py:226] Chunked prefill is enabled with max_num_batched_tokens=8192.
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:30:52 [vllm.py:651] Asynchronous scheduling is enabled.
+[0;36m(APIServer pid=1989844)[0;0m The following generation flags are not valid and may be ignored: ['top_p']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+[0;36m(EngineCore_DP0 pid=1990186)[0;0m INFO 08-24 10:31:15 [core.py:97] Initializing a V1 LLM engine (v0.15.1) with config: model='/models/GLM-5.2-Channel-INT4-w4a8', speculative_config=SpeculativeConfig(method='mtp', model='/models/GLM-5.2-Channel-INT4-w4a8', num_spec_tokens=4), tokenizer='/models/GLM-5.2-Channel-INT4-w4a8', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=True, dtype=torch.bfloat16, max_seq_len=32768, download_dir=None, load_format=auto, tensor_parallel_size=8, pipeline_parallel_size=1, data_parallel_size=1, disable_custom_all_reduce=True, quantization=slimquant_w4a8, enforce_eager=False, enable_return_routed_experts=False, kv_cache_dtype=auto, device_config=cuda, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_fallback=False, disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None, kv_cache_metrics=False, kv_cache_metrics_sample=0.01, cudagraph_metrics=False, enable_layerwise_nvtx_tracing=False, enable_mfu_metrics=False, enable_mm_processor_stats=False, enable_logging_iteration_details=False), seed=0, served_model_name=/models/GLM-5.2-Channel-INT4-w4a8, enable_prefix_caching=True, enable_chunked_prefill=True, pooler_config=None, compilation_config={'level': None, 'mode': <CompilationMode.VLLM_COMPILE: 3>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'inductor', 'custom_ops': ['none', '+sparse_attn_indexer'], 'splitting_ops': ['vllm::unified_attention', 'vllm::unified_attention_with_output', 'vllm::unified_mla_attention', 'vllm::unified_mla_attention_with_output', 'vllm::mamba_mixer2', 'vllm::mamba_mixer', 'vllm::short_conv', 'vllm::linear_attention', 'vllm::plamo2_mamba_mixer', 'vllm::gdn_attention_core', 'vllm::kda_attention', 'vllm::sparse_attn_indexer', 'vllm::rocm_aiter_sparse_attn_indexer', 'vllm::unified_kv_cache_update', 'vllm::fused_qkv_split_rmsnorm_rope_kv_store'], 'compile_mm_encoder': False, 'compile_sizes': [], 'compile_ranges_split_points': [8192], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.FULL_AND_PIECEWISE: (2, 1)>, 'cudagraph_num_of_warmups': 1, 'cudagraph_capture_sizes': [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128, 136, 144, 152, 160, 168, 176, 184, 192, 200, 208, 216, 224, 232, 240, 248, 256, 272, 288, 304, 320, 336, 352, 368, 384, 400, 416, 432, 448, 464, 480, 496, 512], 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {'fuse_norm_quant': False, 'fuse_act_quant': False, 'fuse_attn_quant': False, 'eliminate_noops': True, 'enable_sp': False, 'fuse_gemm_comms': False, 'fuse_allreduce_rms': False}, 'max_cudagraph_capture_size': 512, 'dynamic_shapes_config': {'type': <DynamicShapesType.BACKED: 'backed'>, 'evaluate_guards': False, 'assume_32_bit_indexing': True}, 'local_cache_dir': None, 'static_all_moe_layers': []}
+[0;36m(EngineCore_DP0 pid=1990186)[0;0m WARNING 08-24 10:31:15 [multiproc_executor.py:910] Reducing Torch parallelism from 128 threads to 1 to avoid unnecessary CPU contention. Set OMP_NUM_THREADS in the external environment to tune this value as needed.
+INFO 08-24 10:31:37 [parallel_state.py:1216] world_size=8 rank=4 local_rank=4 distributed_init_method=tcp://127.0.0.1:40495 backend=nccl
+INFO 08-24 10:31:37 [parallel_state.py:1216] world_size=8 rank=1 local_rank=1 distributed_init_method=tcp://127.0.0.1:40495 backend=nccl
+INFO 08-24 10:31:37 [parallel_state.py:1216] world_size=8 rank=7 local_rank=7 distributed_init_method=tcp://127.0.0.1:40495 backend=nccl
+INFO 08-24 10:31:38 [parallel_state.py:1216] world_size=8 rank=0 local_rank=0 distributed_init_method=tcp://127.0.0.1:40495 backend=nccl
+INFO 08-24 10:31:38 [parallel_state.py:1216] world_size=8 rank=6 local_rank=6 distributed_init_method=tcp://127.0.0.1:40495 backend=nccl
+INFO 08-24 10:31:38 [parallel_state.py:1216] world_size=8 rank=2 local_rank=2 distributed_init_method=tcp://127.0.0.1:40495 backend=nccl
+INFO 08-24 10:31:38 [parallel_state.py:1216] world_size=8 rank=3 local_rank=3 distributed_init_method=tcp://127.0.0.1:40495 backend=nccl
+INFO 08-24 10:31:38 [parallel_state.py:1216] world_size=8 rank=5 local_rank=5 distributed_init_method=tcp://127.0.0.1:40495 backend=nccl
+INFO 08-24 10:31:38 [pynccl.py:111] vLLM is using nccl==2.22.3
+INFO 08-24 10:31:41 [parallel_state.py:1427] rank 3 in world size 8 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 3, EP rank 3
+INFO 08-24 10:31:41 [parallel_state.py:1427] rank 4 in world size 8 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 4, EP rank 4
+INFO 08-24 10:31:41 [parallel_state.py:1427] rank 0 in world size 8 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 0, EP rank 0
+INFO 08-24 10:31:41 [parallel_state.py:1427] rank 5 in world size 8 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 5, EP rank 5
+INFO 08-24 10:31:41 [parallel_state.py:1427] rank 1 in world size 8 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 1, EP rank 1
+INFO 08-24 10:31:41 [parallel_state.py:1427] rank 6 in world size 8 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 6, EP rank 6
+INFO 08-24 10:31:41 [parallel_state.py:1427] rank 7 in world size 8 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 7, EP rank 7
+INFO 08-24 10:31:41 [parallel_state.py:1427] rank 2 in world size 8 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 2, EP rank 2
+WARNING 08-24 10:31:42 [__init__.py:204] min_p, logit_bias, and min_tokens parameters won't currently work with speculative decoding enabled.
+WARNING 08-24 10:31:42 [__init__.py:204] min_p, logit_bias, and min_tokens parameters won't currently work with speculative decoding enabled.
+WARNING 08-24 10:31:42 [__init__.py:204] min_p, logit_bias, and min_tokens parameters won't currently work with speculative decoding enabled.
+WARNING 08-24 10:31:42 [__init__.py:204] min_p, logit_bias, and min_tokens parameters won't currently work with speculative decoding enabled.
+WARNING 08-24 10:31:42 [__init__.py:204] min_p, logit_bias, and min_tokens parameters won't currently work with speculative decoding enabled.
+WARNING 08-24 10:31:42 [__init__.py:204] min_p, logit_bias, and min_tokens parameters won't currently work with speculative decoding enabled.
+WARNING 08-24 10:31:42 [__init__.py:204] min_p, logit_bias, and min_tokens parameters won't currently work with speculative decoding enabled.
+WARNING 08-24 10:31:42 [__init__.py:204] min_p, logit_bias, and min_tokens parameters won't currently work with speculative decoding enabled.
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:31:42 [gpu_model_runner.py:4499] Starting to load model /models/GLM-5.2-Channel-INT4-w4a8...
+[0;36m(Worker_TP1 pid=1990529)[0;0m INFO 08-24 10:31:43 [rocm.py:281] Using Sparse MLA backend.
+[0;36m(Worker_TP2 pid=1990530)[0;0m INFO 08-24 10:31:43 [rocm.py:281] Using Sparse MLA backend.
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:31:43 [rocm.py:281] Using Sparse MLA backend.
+[0;36m(Worker_TP6 pid=1990534)[0;0m INFO 08-24 10:31:43 [rocm.py:281] Using Sparse MLA backend.
+[0;36m(Worker_TP5 pid=1990533)[0;0m INFO 08-24 10:31:43 [rocm.py:281] Using Sparse MLA backend.
+[0;36m(Worker_TP3 pid=1990531)[0;0m INFO 08-24 10:31:43 [rocm.py:281] Using Sparse MLA backend.
+[0;36m(Worker_TP7 pid=1990535)[0;0m INFO 08-24 10:31:43 [rocm.py:281] Using Sparse MLA backend.
+[0;36m(Worker_TP4 pid=1990532)[0;0m INFO 08-24 10:31:43 [rocm.py:281] Using Sparse MLA backend.
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:   0% Completed | 0/141 [00:00<?, ?it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:   1% Completed | 1/141 [00:00<00:40,  3.45it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:   1% Completed | 2/141 [00:00<00:43,  3.20it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:   2% Completed | 3/141 [00:00<00:45,  3.06it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:   3% Completed | 4/141 [00:01<00:44,  3.08it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:   4% Completed | 5/141 [00:01<00:43,  3.10it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:   4% Completed | 6/141 [00:01<00:42,  3.18it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:   5% Completed | 7/141 [00:02<00:42,  3.18it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:   6% Completed | 8/141 [00:02<00:40,  3.25it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:   6% Completed | 9/141 [00:02<00:39,  3.33it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:   7% Completed | 10/141 [00:03<00:39,  3.35it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:   8% Completed | 11/141 [00:03<00:38,  3.36it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:   9% Completed | 12/141 [00:03<00:39,  3.27it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:   9% Completed | 13/141 [00:04<00:39,  3.25it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  10% Completed | 14/141 [00:04<00:39,  3.18it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  11% Completed | 15/141 [00:04<00:41,  3.06it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  11% Completed | 16/141 [00:05<00:42,  2.98it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  12% Completed | 17/141 [00:05<00:42,  2.92it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  13% Completed | 18/141 [00:05<00:43,  2.86it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  13% Completed | 19/141 [00:06<00:42,  2.85it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  14% Completed | 20/141 [00:06<00:42,  2.83it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  15% Completed | 21/141 [00:06<00:41,  2.86it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  16% Completed | 22/141 [00:07<00:41,  2.86it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  16% Completed | 23/141 [00:07<00:41,  2.85it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  17% Completed | 24/141 [00:07<00:41,  2.83it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  18% Completed | 25/141 [00:08<00:40,  2.85it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  18% Completed | 26/141 [00:08<00:39,  2.89it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  19% Completed | 27/141 [00:08<00:33,  3.36it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  20% Completed | 28/141 [00:09<00:34,  3.24it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  21% Completed | 29/141 [00:09<00:36,  3.08it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  21% Completed | 30/141 [00:09<00:37,  2.95it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  22% Completed | 31/141 [00:10<00:37,  2.94it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  23% Completed | 32/141 [00:10<00:37,  2.90it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  23% Completed | 33/141 [00:10<00:37,  2.89it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  24% Completed | 34/141 [00:11<00:37,  2.86it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  25% Completed | 35/141 [00:11<00:37,  2.82it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  26% Completed | 36/141 [00:11<00:37,  2.81it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  26% Completed | 37/141 [00:12<00:37,  2.81it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  27% Completed | 38/141 [00:12<00:36,  2.81it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  28% Completed | 39/141 [00:13<00:36,  2.80it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  28% Completed | 40/141 [00:13<00:36,  2.81it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  29% Completed | 41/141 [00:13<00:36,  2.77it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  30% Completed | 42/141 [00:14<00:35,  2.79it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  30% Completed | 43/141 [00:14<00:35,  2.77it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  31% Completed | 44/141 [00:14<00:34,  2.77it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  32% Completed | 45/141 [00:15<00:32,  2.93it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  33% Completed | 46/141 [00:15<00:33,  2.87it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  33% Completed | 47/141 [00:15<00:32,  2.85it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  34% Completed | 48/141 [00:16<00:32,  2.85it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  35% Completed | 49/141 [00:16<00:32,  2.82it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  35% Completed | 50/141 [00:16<00:32,  2.76it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  36% Completed | 51/141 [00:17<00:33,  2.69it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  37% Completed | 52/141 [00:17<00:33,  2.68it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  38% Completed | 53/141 [00:18<00:32,  2.68it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  38% Completed | 54/141 [00:18<00:31,  2.73it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  39% Completed | 55/141 [00:18<00:31,  2.74it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  40% Completed | 56/141 [00:19<00:31,  2.73it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  40% Completed | 57/141 [00:19<00:30,  2.75it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  41% Completed | 58/141 [00:19<00:28,  2.93it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  42% Completed | 59/141 [00:20<00:29,  2.81it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  43% Completed | 60/141 [00:20<00:29,  2.77it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  43% Completed | 61/141 [00:20<00:28,  2.80it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  44% Completed | 62/141 [00:21<00:27,  2.83it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  45% Completed | 63/141 [00:21<00:27,  2.84it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  45% Completed | 64/141 [00:21<00:26,  2.93it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  46% Completed | 65/141 [00:22<00:25,  2.98it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  47% Completed | 66/141 [00:22<00:25,  2.99it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  48% Completed | 67/141 [00:22<00:23,  3.09it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  48% Completed | 68/141 [00:23<00:23,  3.09it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  49% Completed | 69/141 [00:23<00:24,  2.97it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  50% Completed | 70/141 [00:23<00:24,  2.91it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  50% Completed | 71/141 [00:24<00:24,  2.89it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  51% Completed | 72/141 [00:24<00:23,  2.90it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  52% Completed | 73/141 [00:25<00:23,  2.83it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  52% Completed | 74/141 [00:25<00:23,  2.82it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  53% Completed | 75/141 [00:25<00:23,  2.81it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  54% Completed | 76/141 [00:26<00:23,  2.82it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  55% Completed | 77/141 [00:26<00:22,  2.81it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  55% Completed | 78/141 [00:26<00:22,  2.80it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  56% Completed | 79/141 [00:27<00:22,  2.78it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  57% Completed | 80/141 [00:27<00:22,  2.76it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  57% Completed | 81/141 [00:27<00:22,  2.69it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  58% Completed | 82/141 [00:28<00:21,  2.69it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  59% Completed | 83/141 [00:28<00:21,  2.72it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  60% Completed | 84/141 [00:29<00:20,  2.78it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  60% Completed | 85/141 [00:29<00:20,  2.76it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  61% Completed | 86/141 [00:29<00:19,  2.79it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  62% Completed | 87/141 [00:30<00:19,  2.79it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  62% Completed | 88/141 [00:30<00:19,  2.76it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  63% Completed | 89/141 [00:30<00:18,  2.80it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  64% Completed | 90/141 [00:31<00:18,  2.82it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  65% Completed | 91/141 [00:31<00:17,  2.81it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  65% Completed | 92/141 [00:31<00:17,  2.81it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  66% Completed | 93/141 [00:32<00:16,  2.85it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  67% Completed | 95/141 [00:32<00:12,  3.60it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  68% Completed | 96/141 [00:32<00:13,  3.38it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  69% Completed | 97/141 [00:33<00:13,  3.22it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  70% Completed | 98/141 [00:33<00:13,  3.12it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  70% Completed | 99/141 [00:33<00:13,  3.04it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  71% Completed | 100/141 [00:34<00:13,  3.01it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  72% Completed | 101/141 [00:34<00:13,  2.99it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  72% Completed | 102/141 [00:35<00:13,  2.90it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  73% Completed | 103/141 [00:35<00:12,  2.98it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  74% Completed | 104/141 [00:35<00:12,  2.94it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  74% Completed | 105/141 [00:36<00:12,  2.91it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  75% Completed | 106/141 [00:36<00:11,  2.93it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  76% Completed | 107/141 [00:36<00:11,  2.91it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  77% Completed | 108/141 [00:37<00:11,  2.87it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  77% Completed | 109/141 [00:37<00:11,  2.83it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  78% Completed | 110/141 [00:37<00:10,  2.87it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  79% Completed | 111/141 [00:38<00:10,  2.88it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  79% Completed | 112/141 [00:38<00:10,  2.85it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  80% Completed | 113/141 [00:38<00:09,  2.85it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  81% Completed | 114/141 [00:39<00:09,  2.81it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  82% Completed | 115/141 [00:39<00:09,  2.81it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  82% Completed | 116/141 [00:39<00:08,  2.86it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  83% Completed | 117/141 [00:40<00:08,  2.81it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  84% Completed | 118/141 [00:40<00:08,  2.78it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  84% Completed | 119/141 [00:41<00:07,  2.79it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  85% Completed | 120/141 [00:41<00:07,  2.77it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  86% Completed | 121/141 [00:41<00:07,  2.73it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  87% Completed | 122/141 [00:42<00:06,  2.76it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  87% Completed | 123/141 [00:42<00:06,  2.74it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  88% Completed | 124/141 [00:42<00:06,  2.72it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  89% Completed | 125/141 [00:43<00:05,  2.70it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  89% Completed | 126/141 [00:43<00:05,  2.64it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  90% Completed | 127/141 [00:43<00:05,  2.67it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  91% Completed | 128/141 [00:44<00:04,  2.71it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  91% Completed | 129/141 [00:44<00:04,  2.75it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  92% Completed | 130/141 [00:45<00:03,  2.76it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  93% Completed | 131/141 [00:45<00:03,  2.76it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  94% Completed | 132/141 [00:45<00:03,  2.84it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  94% Completed | 133/141 [00:46<00:02,  2.83it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  95% Completed | 134/141 [00:46<00:02,  2.85it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  96% Completed | 135/141 [00:46<00:02,  2.85it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  96% Completed | 136/141 [00:47<00:01,  2.84it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  97% Completed | 137/141 [00:47<00:01,  2.83it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  98% Completed | 138/141 [00:47<00:01,  2.82it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  99% Completed | 139/141 [00:48<00:00,  2.82it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  99% Completed | 140/141 [00:48<00:00,  2.78it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards: 100% Completed | 141/141 [00:48<00:00,  2.78it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards: 100% Completed | 141/141 [00:48<00:00,  2.88it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m 
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:32:33 [default_loader.py:291] Loading weights took 49.18 seconds
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:32:37 [gpu_model_runner.py:4526] Loading drafter model...
+[0;36m(Worker_TP1 pid=1990529)[0;0m INFO 08-24 10:32:37 [gpu_model_runner.py:4526] Loading drafter model...
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:   0% Completed | 0/141 [00:00<?, ?it/s]
+[0;36m(Worker_TP7 pid=1990535)[0;0m INFO 08-24 10:32:37 [gpu_model_runner.py:4526] Loading drafter model...
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:   3% Completed | 4/141 [00:00<00:04, 32.83it/s]
+[0;36m(Worker_TP3 pid=1990531)[0;0m INFO 08-24 10:32:37 [gpu_model_runner.py:4526] Loading drafter model...
+[0;36m(Worker_TP4 pid=1990532)[0;0m INFO 08-24 10:32:37 [gpu_model_runner.py:4526] Loading drafter model...
+[0;36m(Worker_TP5 pid=1990533)[0;0m INFO 08-24 10:32:37 [gpu_model_runner.py:4526] Loading drafter model...
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:   6% Completed | 8/141 [00:00<00:04, 32.63it/s]
+[0;36m(Worker_TP6 pid=1990534)[0;0m INFO 08-24 10:32:37 [gpu_model_runner.py:4526] Loading drafter model...
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:   9% Completed | 12/141 [00:00<00:03, 32.72it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  11% Completed | 16/141 [00:00<00:03, 32.30it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  14% Completed | 20/141 [00:00<00:03, 31.74it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  17% Completed | 24/141 [00:00<00:03, 31.67it/s]
+[0;36m(Worker_TP2 pid=1990530)[0;0m INFO 08-24 10:32:38 [gpu_model_runner.py:4526] Loading drafter model...
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  20% Completed | 28/141 [00:01<00:05, 20.93it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  23% Completed | 32/141 [00:01<00:04, 23.24it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  26% Completed | 36/141 [00:01<00:04, 25.19it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  28% Completed | 40/141 [00:01<00:03, 26.51it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  30% Completed | 43/141 [00:01<00:03, 26.98it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  33% Completed | 46/141 [00:01<00:04, 22.68it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  35% Completed | 50/141 [00:01<00:03, 24.67it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  38% Completed | 53/141 [00:01<00:03, 25.86it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  40% Completed | 57/141 [00:02<00:03, 27.36it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  43% Completed | 61/141 [00:02<00:02, 30.23it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  46% Completed | 65/141 [00:02<00:02, 30.48it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  49% Completed | 69/141 [00:02<00:02, 30.66it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  52% Completed | 73/141 [00:02<00:02, 30.82it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  55% Completed | 77/141 [00:02<00:02, 30.78it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  57% Completed | 81/141 [00:02<00:01, 30.84it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  60% Completed | 85/141 [00:03<00:01, 30.91it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  63% Completed | 89/141 [00:03<00:01, 31.06it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  66% Completed | 93/141 [00:03<00:01, 31.25it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  69% Completed | 97/141 [00:03<00:02, 19.86it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  72% Completed | 101/141 [00:03<00:01, 22.28it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  74% Completed | 105/141 [00:03<00:01, 24.53it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  77% Completed | 109/141 [00:04<00:01, 26.11it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  80% Completed | 113/141 [00:04<00:01, 27.44it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  83% Completed | 117/141 [00:04<00:00, 28.47it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  86% Completed | 121/141 [00:04<00:00, 29.24it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  89% Completed | 125/141 [00:04<00:00, 29.78it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  91% Completed | 129/141 [00:04<00:00, 30.22it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  94% Completed | 133/141 [00:04<00:00, 30.54it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards:  97% Completed | 137/141 [00:04<00:00, 30.79it/s]
+[0;36m(Worker_TP1 pid=1990529)[0;0m INFO 08-24 10:32:42 [eagle.py:1382] Detected MTP model. Sharing target model embedding weights with the draft model.
+[0;36m(Worker_TP1 pid=1990529)[0;0m INFO 08-24 10:32:42 [eagle.py:1431] Detected MTP model. Sharing target model lm_head weights with the draft model.
+[0;36m(Worker_TP1 pid=1990529)[0;0m INFO 08-24 10:32:42 [eagle.py:1455] Shared target model lm_head with MTP shared_head.head.
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards: 100% Completed | 141/141 [00:05<00:00, 30.94it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Loading safetensors checkpoint shards: 100% Completed | 141/141 [00:05<00:00, 27.98it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m 
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:32:42 [default_loader.py:291] Loading weights took 5.28 seconds
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:32:42 [eagle.py:1382] Detected MTP model. Sharing target model embedding weights with the draft model.
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:32:42 [eagle.py:1431] Detected MTP model. Sharing target model lm_head weights with the draft model.
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:32:42 [eagle.py:1455] Shared target model lm_head with MTP shared_head.head.
+[0;36m(Worker_TP7 pid=1990535)[0;0m INFO 08-24 10:32:42 [eagle.py:1382] Detected MTP model. Sharing target model embedding weights with the draft model.
+[0;36m(Worker_TP7 pid=1990535)[0;0m INFO 08-24 10:32:42 [eagle.py:1431] Detected MTP model. Sharing target model lm_head weights with the draft model.
+[0;36m(Worker_TP7 pid=1990535)[0;0m INFO 08-24 10:32:42 [eagle.py:1455] Shared target model lm_head with MTP shared_head.head.
+[0;36m(Worker_TP4 pid=1990532)[0;0m INFO 08-24 10:32:42 [eagle.py:1382] Detected MTP model. Sharing target model embedding weights with the draft model.
+[0;36m(Worker_TP4 pid=1990532)[0;0m INFO 08-24 10:32:42 [eagle.py:1431] Detected MTP model. Sharing target model lm_head weights with the draft model.
+[0;36m(Worker_TP4 pid=1990532)[0;0m INFO 08-24 10:32:42 [eagle.py:1455] Shared target model lm_head with MTP shared_head.head.
+[0;36m(Worker_TP3 pid=1990531)[0;0m INFO 08-24 10:32:43 [eagle.py:1382] Detected MTP model. Sharing target model embedding weights with the draft model.
+[0;36m(Worker_TP3 pid=1990531)[0;0m INFO 08-24 10:32:43 [eagle.py:1431] Detected MTP model. Sharing target model lm_head weights with the draft model.
+[0;36m(Worker_TP3 pid=1990531)[0;0m INFO 08-24 10:32:43 [eagle.py:1455] Shared target model lm_head with MTP shared_head.head.
+[0;36m(Worker_TP5 pid=1990533)[0;0m INFO 08-24 10:32:43 [eagle.py:1382] Detected MTP model. Sharing target model embedding weights with the draft model.
+[0;36m(Worker_TP5 pid=1990533)[0;0m INFO 08-24 10:32:43 [eagle.py:1431] Detected MTP model. Sharing target model lm_head weights with the draft model.
+[0;36m(Worker_TP5 pid=1990533)[0;0m INFO 08-24 10:32:43 [eagle.py:1455] Shared target model lm_head with MTP shared_head.head.
+[0;36m(Worker_TP6 pid=1990534)[0;0m INFO 08-24 10:32:43 [eagle.py:1382] Detected MTP model. Sharing target model embedding weights with the draft model.
+[0;36m(Worker_TP6 pid=1990534)[0;0m INFO 08-24 10:32:43 [eagle.py:1431] Detected MTP model. Sharing target model lm_head weights with the draft model.
+[0;36m(Worker_TP6 pid=1990534)[0;0m INFO 08-24 10:32:43 [eagle.py:1455] Shared target model lm_head with MTP shared_head.head.
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:32:43 [gpu_model_runner.py:4596] Model loading took 51.05 GiB memory and 58.893206 seconds
+[0;36m(Worker_TP2 pid=1990530)[0;0m INFO 08-24 10:32:43 [eagle.py:1382] Detected MTP model. Sharing target model embedding weights with the draft model.
+[0;36m(Worker_TP2 pid=1990530)[0;0m INFO 08-24 10:32:43 [eagle.py:1431] Detected MTP model. Sharing target model lm_head weights with the draft model.
+[0;36m(Worker_TP2 pid=1990530)[0;0m INFO 08-24 10:32:43 [eagle.py:1455] Shared target model lm_head with MTP shared_head.head.
+[0;36m(Worker_TP4 pid=1990532)[0;0m WARNING 08-24 10:32:45 [forward_context.py:290] vllm_config.compilation_config.fast_moe_cold_start is not compatible with speculative decoding so we are ignoring fast_moe_cold_start.
+[0;36m(Worker_TP0 pid=1990528)[0;0m WARNING 08-24 10:32:45 [forward_context.py:290] vllm_config.compilation_config.fast_moe_cold_start is not compatible with speculative decoding so we are ignoring fast_moe_cold_start.
+[0;36m(Worker_TP2 pid=1990530)[0;0m WARNING 08-24 10:32:45 [forward_context.py:290] vllm_config.compilation_config.fast_moe_cold_start is not compatible with speculative decoding so we are ignoring fast_moe_cold_start.
+[0;36m(Worker_TP1 pid=1990529)[0;0m WARNING 08-24 10:32:45 [forward_context.py:290] vllm_config.compilation_config.fast_moe_cold_start is not compatible with speculative decoding so we are ignoring fast_moe_cold_start.
+[0;36m(Worker_TP6 pid=1990534)[0;0m WARNING 08-24 10:32:45 [forward_context.py:290] vllm_config.compilation_config.fast_moe_cold_start is not compatible with speculative decoding so we are ignoring fast_moe_cold_start.
+[0;36m(Worker_TP5 pid=1990533)[0;0m WARNING 08-24 10:32:45 [forward_context.py:290] vllm_config.compilation_config.fast_moe_cold_start is not compatible with speculative decoding so we are ignoring fast_moe_cold_start.
+[0;36m(Worker_TP3 pid=1990531)[0;0m WARNING 08-24 10:32:45 [forward_context.py:290] vllm_config.compilation_config.fast_moe_cold_start is not compatible with speculative decoding so we are ignoring fast_moe_cold_start.
+[0;36m(Worker_TP7 pid=1990535)[0;0m WARNING 08-24 10:32:45 [forward_context.py:290] vllm_config.compilation_config.fast_moe_cold_start is not compatible with speculative decoding so we are ignoring fast_moe_cold_start.
+[0;36m(Worker_TP4 pid=1990532)[0;0m /usr/local/lib/python3.10/dist-packages/torch/_dynamo/variables/functions.py:1692: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+[0;36m(Worker_TP4 pid=1990532)[0;0m   torch._dynamo.utils.warn_once(msg)
+[0;36m(Worker_TP0 pid=1990528)[0;0m /usr/local/lib/python3.10/dist-packages/torch/_dynamo/variables/functions.py:1692: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+[0;36m(Worker_TP0 pid=1990528)[0;0m   torch._dynamo.utils.warn_once(msg)
+[0;36m(Worker_TP2 pid=1990530)[0;0m /usr/local/lib/python3.10/dist-packages/torch/_dynamo/variables/functions.py:1692: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+[0;36m(Worker_TP2 pid=1990530)[0;0m   torch._dynamo.utils.warn_once(msg)
+[0;36m(Worker_TP1 pid=1990529)[0;0m /usr/local/lib/python3.10/dist-packages/torch/_dynamo/variables/functions.py:1692: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+[0;36m(Worker_TP1 pid=1990529)[0;0m   torch._dynamo.utils.warn_once(msg)
+[0;36m(Worker_TP6 pid=1990534)[0;0m /usr/local/lib/python3.10/dist-packages/torch/_dynamo/variables/functions.py:1692: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+[0;36m(Worker_TP6 pid=1990534)[0;0m   torch._dynamo.utils.warn_once(msg)
+[0;36m(Worker_TP5 pid=1990533)[0;0m /usr/local/lib/python3.10/dist-packages/torch/_dynamo/variables/functions.py:1692: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+[0;36m(Worker_TP5 pid=1990533)[0;0m   torch._dynamo.utils.warn_once(msg)
+[0;36m(Worker_TP3 pid=1990531)[0;0m /usr/local/lib/python3.10/dist-packages/torch/_dynamo/variables/functions.py:1692: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+[0;36m(Worker_TP3 pid=1990531)[0;0m   torch._dynamo.utils.warn_once(msg)
+[0;36m(Worker_TP7 pid=1990535)[0;0m /usr/local/lib/python3.10/dist-packages/torch/_dynamo/variables/functions.py:1692: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+[0;36m(Worker_TP7 pid=1990535)[0;0m   torch._dynamo.utils.warn_once(msg)
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:33:06 [backends.py:812] Using cache directory: /root/.cache/vllm/torch_compile_cache/5284ec6932/rank_0_0/backbone for vLLM's torch.compile
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:33:06 [backends.py:872] Dynamo bytecode transform time: 20.91 s
+[0;36m(Worker_TP4 pid=1990532)[0;0m INFO 08-24 10:33:23 [backends.py:302] Cache the graph of compile range (1, 8192) for later use
+[0;36m(Worker_TP6 pid=1990534)[0;0m INFO 08-24 10:33:23 [backends.py:302] Cache the graph of compile range (1, 8192) for later use
+[0;36m(Worker_TP2 pid=1990530)[0;0m INFO 08-24 10:33:23 [backends.py:302] Cache the graph of compile range (1, 8192) for later use
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:33:24 [backends.py:302] Cache the graph of compile range (1, 8192) for later use
+[0;36m(Worker_TP3 pid=1990531)[0;0m INFO 08-24 10:33:24 [backends.py:302] Cache the graph of compile range (1, 8192) for later use
+[0;36m(Worker_TP1 pid=1990529)[0;0m INFO 08-24 10:33:24 [backends.py:302] Cache the graph of compile range (1, 8192) for later use
+[0;36m(Worker_TP7 pid=1990535)[0;0m INFO 08-24 10:33:24 [backends.py:302] Cache the graph of compile range (1, 8192) for later use
+[0;36m(Worker_TP5 pid=1990533)[0;0m INFO 08-24 10:33:25 [backends.py:302] Cache the graph of compile range (1, 8192) for later use
+[0;36m(EngineCore_DP0 pid=1990186)[0;0m INFO 08-24 10:33:44 [shm_broadcast.py:542] No available shared memory broadcast block found in 60 seconds. This typically happens when some processes are hanging or doing some time-consuming work (e.g. compilation, weight/kv cache quantization).
+[0;36m(EngineCore_DP0 pid=1990186)[0;0m INFO 08-24 10:34:44 [shm_broadcast.py:542] No available shared memory broadcast block found in 60 seconds. This typically happens when some processes are hanging or doing some time-consuming work (e.g. compilation, weight/kv cache quantization).
+[0;36m(EngineCore_DP0 pid=1990186)[0;0m INFO 08-24 10:35:44 [shm_broadcast.py:542] No available shared memory broadcast block found in 60 seconds. This typically happens when some processes are hanging or doing some time-consuming work (e.g. compilation, weight/kv cache quantization).
+[0;36m(EngineCore_DP0 pid=1990186)[0;0m INFO 08-24 10:36:44 [shm_broadcast.py:542] No available shared memory broadcast block found in 60 seconds. This typically happens when some processes are hanging or doing some time-consuming work (e.g. compilation, weight/kv cache quantization).
+[0;36m(EngineCore_DP0 pid=1990186)[0;0m INFO 08-24 10:37:44 [shm_broadcast.py:542] No available shared memory broadcast block found in 60 seconds. This typically happens when some processes are hanging or doing some time-consuming work (e.g. compilation, weight/kv cache quantization).
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:37:53 [backends.py:319] Compiling a graph for compile range (1, 8192) takes 273.41 s
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:37:53 [monitor.py:34] torch.compile takes 294.32 s in total
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:37:56 [backends.py:812] Using cache directory: /root/.cache/vllm/torch_compile_cache/5284ec6932/rank_0_0/eagle_head for vLLM's torch.compile
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:37:56 [backends.py:872] Dynamo bytecode transform time: 2.78 s
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:37:58 [backends.py:319] Compiling a graph for compile range (1, 8192) takes 1.20 s
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:37:58 [monitor.py:34] torch.compile takes 298.29 s in total
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:38:02 [gpu_worker.py:364] Available KV cache memory: 3.38 GiB
+[0;36m(EngineCore_DP0 pid=1990186)[0;0m INFO 08-24 10:38:02 [kv_cache_utils.py:1307] GPU KV cache size: 37,312 tokens
+[0;36m(EngineCore_DP0 pid=1990186)[0;0m INFO 08-24 10:38:02 [kv_cache_utils.py:1312] Maximum concurrency for 32,768 tokens per request: 1.14x
+[0;36m(Worker_TP0 pid=1990528)[0;0m Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):   0%|          | 0/48 [00:00<?, ?it/s][0;36m(Worker_TP2 pid=1990530)[0;0m /usr/local/lib/python3.10/dist-packages/torch/cuda/graphs.py:128: UserWarning: The CUDA Graph is empty. This usually means that the graph was attempted to be captured on wrong device or stream. (Triggered internally at /pytorch/aten/src/ATen/hip/HIPGraph.cpp:140.)
+[0;36m(Worker_TP2 pid=1990530)[0;0m   super().capture_end()
+[0;36m(Worker_TP7 pid=1990535)[0;0m /usr/local/lib/python3.10/dist-packages/torch/cuda/graphs.py:128: UserWarning: The CUDA Graph is empty. This usually means that the graph was attempted to be captured on wrong device or stream. (Triggered internally at /pytorch/aten/src/ATen/hip/HIPGraph.cpp:140.)
+[0;36m(Worker_TP7 pid=1990535)[0;0m   super().capture_end()
+/usr/local/lib/python3.10/dist-packages/torch/cuda/graphs.py:128: UserWarning: The CUDA Graph is empty. This usually means that the graph was attempted to be captured on wrong device or stream. (Triggered internally at /pytorch/aten/src/ATen/hip/HIPGraph.cpp:140.)
+[0;36m(Worker_TP0 pid=1990528)[0;0m   super().capture_end()
+[0;36m(Worker_TP6 pid=1990534)[0;0m /usr/local/lib/python3.10/dist-packages/torch/cuda/graphs.py:128: UserWarning: The CUDA Graph is empty. This usually means that the graph was attempted to be captured on wrong device or stream. (Triggered internally at /pytorch/aten/src/ATen/hip/HIPGraph.cpp:140.)
+[0;36m(Worker_TP6 pid=1990534)[0;0m   super().capture_end()
+[0;36m(Worker_TP3 pid=1990531)[0;0m /usr/local/lib/python3.10/dist-packages/torch/cuda/graphs.py:128: UserWarning: The CUDA Graph is empty. This usually means that the graph was attempted to be captured on wrong device or stream. (Triggered internally at /pytorch/aten/src/ATen/hip/HIPGraph.cpp:140.)
+[0;36m(Worker_TP3 pid=1990531)[0;0m   super().capture_end()
+[0;36m(Worker_TP4 pid=1990532)[0;0m /usr/local/lib/python3.10/dist-packages/torch/cuda/graphs.py:128: UserWarning: The CUDA Graph is empty. This usually means that the graph was attempted to be captured on wrong device or stream. (Triggered internally at /pytorch/aten/src/ATen/hip/HIPGraph.cpp:140.)
+[0;36m(Worker_TP4 pid=1990532)[0;0m   super().capture_end()
+[0;36m(Worker_TP1 pid=1990529)[0;0m /usr/local/lib/python3.10/dist-packages/torch/cuda/graphs.py:128: UserWarning: The CUDA Graph is empty. This usually means that the graph was attempted to be captured on wrong device or stream. (Triggered internally at /pytorch/aten/src/ATen/hip/HIPGraph.cpp:140.)
+[0;36m(Worker_TP1 pid=1990529)[0;0m   super().capture_end()
+[0;36m(Worker_TP5 pid=1990533)[0;0m /usr/local/lib/python3.10/dist-packages/torch/cuda/graphs.py:128: UserWarning: The CUDA Graph is empty. This usually means that the graph was attempted to be captured on wrong device or stream. (Triggered internally at /pytorch/aten/src/ATen/hip/HIPGraph.cpp:140.)
+[0;36m(Worker_TP5 pid=1990533)[0;0m   super().capture_end()
+[0;36m(Worker_TP0 pid=1990528)[0;0m Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):   2%|▏         | 1/48 [00:00<00:26,  1.80it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):   4%|▍         | 2/48 [00:01<00:25,  1.81it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):   6%|▋         | 3/48 [00:01<00:24,  1.85it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):   8%|▊         | 4/48 [00:02<00:22,  1.95it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  10%|█         | 5/48 [00:02<00:21,  1.99it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  12%|█▎        | 6/48 [00:03<00:20,  2.03it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  15%|█▍        | 7/48 [00:03<00:19,  2.08it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  17%|█▋        | 8/48 [00:03<00:19,  2.10it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  19%|█▉        | 9/48 [00:04<00:18,  2.11it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  21%|██        | 10/48 [00:04<00:17,  2.15it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  23%|██▎       | 11/48 [00:05<00:16,  2.21it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  25%|██▌       | 12/48 [00:05<00:16,  2.21it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  27%|██▋       | 13/48 [00:06<00:15,  2.24it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  29%|██▉       | 14/48 [00:06<00:15,  2.26it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  31%|███▏      | 15/48 [00:07<00:14,  2.28it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  33%|███▎      | 16/48 [00:07<00:13,  2.31it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  35%|███▌      | 17/48 [00:07<00:13,  2.32it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  38%|███▊      | 18/48 [00:08<00:12,  2.36it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  40%|███▉      | 19/48 [00:08<00:12,  2.41it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  42%|████▏     | 20/48 [00:09<00:11,  2.44it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  44%|████▍     | 21/48 [00:09<00:10,  2.48it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  46%|████▌     | 22/48 [00:09<00:10,  2.50it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  48%|████▊     | 23/48 [00:10<00:09,  2.54it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  50%|█████     | 24/48 [00:10<00:09,  2.57it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  52%|█████▏    | 25/48 [00:11<00:08,  2.58it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  54%|█████▍    | 26/48 [00:11<00:08,  2.60it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  56%|█████▋    | 27/48 [00:11<00:07,  2.64it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  58%|█████▊    | 28/48 [00:12<00:07,  2.67it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  60%|██████    | 29/48 [00:12<00:07,  2.69it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  62%|██████▎   | 30/48 [00:12<00:06,  2.70it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  65%|██████▍   | 31/48 [00:13<00:06,  2.70it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  67%|██████▋   | 32/48 [00:13<00:05,  2.71it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  69%|██████▉   | 33/48 [00:13<00:05,  2.68it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  71%|███████   | 34/48 [00:14<00:05,  2.70it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  73%|███████▎  | 35/48 [00:14<00:04,  2.69it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  75%|███████▌  | 36/48 [00:15<00:04,  2.69it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  77%|███████▋  | 37/48 [00:15<00:04,  2.70it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  79%|███████▉  | 38/48 [00:15<00:03,  2.66it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  81%|████████▏ | 39/48 [00:16<00:03,  2.68it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  83%|████████▎ | 40/48 [00:16<00:03,  2.66it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  85%|████████▌ | 41/48 [00:16<00:02,  2.66it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  88%|████████▊ | 42/48 [00:17<00:02,  2.65it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  90%|████████▉ | 43/48 [00:17<00:01,  2.66it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  92%|█████████▏| 44/48 [00:18<00:01,  2.66it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  94%|█████████▍| 45/48 [00:18<00:01,  2.53it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  96%|█████████▌| 46/48 [00:18<00:00,  2.56it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  98%|█████████▊| 47/48 [00:19<00:00,  2.61it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE): 100%|██████████| 48/48 [00:19<00:00,  2.64it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE): 100%|██████████| 48/48 [00:19<00:00,  2.44it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m Capturing CUDA graphs (decode, FULL):   0%|          | 0/37 [00:00<?, ?it/s][0;36m(Worker_TP7 pid=1990535)[0;0m [2026-08-24 10:38:24] WARNING env.py:39: Loading tilelang libs from dev root: /workspace/test/tilelang/build
+[2026-08-24 10:38:24] WARNING env.py:39: Loading tilelang libs from dev root: /workspace/test/tilelang/build
+[0;36m(Worker_TP6 pid=1990534)[0;0m [2026-08-24 10:38:24] WARNING env.py:39: Loading tilelang libs from dev root: /workspace/test/tilelang/build
+[0;36m(Worker_TP4 pid=1990532)[0;0m [2026-08-24 10:38:24] WARNING env.py:39: Loading tilelang libs from dev root: /workspace/test/tilelang/build
+[0;36m(Worker_TP5 pid=1990533)[0;0m [2026-08-24 10:38:24] WARNING env.py:39: Loading tilelang libs from dev root: /workspace/test/tilelang/build
+[0;36m(Worker_TP2 pid=1990530)[0;0m [2026-08-24 10:38:24] WARNING env.py:39: Loading tilelang libs from dev root: /workspace/test/tilelang/build
+[0;36m(Worker_TP1 pid=1990529)[0;0m [2026-08-24 10:38:24] WARNING env.py:39: Loading tilelang libs from dev root: /workspace/test/tilelang/build
+[0;36m(Worker_TP3 pid=1990531)[0;0m [2026-08-24 10:38:24] WARNING env.py:39: Loading tilelang libs from dev root: /workspace/test/tilelang/build
+[0;36m(Worker_TP0 pid=1990528)[0;0m Capturing CUDA graphs (decode, FULL):   3%|▎         | 1/37 [00:07<04:31,  7.55s/it]Capturing CUDA graphs (decode, FULL):   5%|▌         | 2/37 [00:08<02:00,  3.44s/it]Capturing CUDA graphs (decode, FULL):   8%|▊         | 3/37 [00:08<01:11,  2.11s/it]Capturing CUDA graphs (decode, FULL):  11%|█         | 4/37 [00:09<00:48,  1.48s/it]Capturing CUDA graphs (decode, FULL):  14%|█▎        | 5/37 [00:09<00:36,  1.14s/it]Capturing CUDA graphs (decode, FULL):  16%|█▌        | 6/37 [00:10<00:28,  1.08it/s]Capturing CUDA graphs (decode, FULL):  19%|█▉        | 7/37 [00:10<00:23,  1.28it/s]Capturing CUDA graphs (decode, FULL):  22%|██▏       | 8/37 [00:11<00:19,  1.45it/s]Capturing CUDA graphs (decode, FULL):  24%|██▍       | 9/37 [00:11<00:17,  1.59it/s]Capturing CUDA graphs (decode, FULL):  27%|██▋       | 10/37 [00:12<00:15,  1.71it/s]Capturing CUDA graphs (decode, FULL):  30%|██▉       | 11/37 [00:12<00:14,  1.81it/s]Capturing CUDA graphs (decode, FULL):  32%|███▏      | 12/37 [00:13<00:13,  1.90it/s]Capturing CUDA graphs (decode, FULL):  35%|███▌      | 13/37 [00:13<00:12,  1.97it/s]Capturing CUDA graphs (decode, FULL):  38%|███▊      | 14/37 [00:14<00:15,  1.45it/s]Capturing CUDA graphs (decode, FULL):  41%|████      | 15/37 [00:15<00:14,  1.57it/s]Capturing CUDA graphs (decode, FULL):  43%|████▎     | 16/37 [00:15<00:12,  1.71it/s]Capturing CUDA graphs (decode, FULL):  46%|████▌     | 17/37 [00:16<00:10,  1.84it/s]Capturing CUDA graphs (decode, FULL):  49%|████▊     | 18/37 [00:16<00:09,  1.94it/s]Capturing CUDA graphs (decode, FULL):  51%|█████▏    | 19/37 [00:17<00:08,  2.01it/s]Capturing CUDA graphs (decode, FULL):  54%|█████▍    | 20/37 [00:17<00:08,  2.06it/s]Capturing CUDA graphs (decode, FULL):  57%|█████▋    | 21/37 [00:17<00:07,  2.11it/s]Capturing CUDA graphs (decode, FULL):  59%|█████▉    | 22/37 [00:18<00:09,  1.53it/s]Capturing CUDA graphs (decode, FULL):  62%|██████▏   | 23/37 [00:19<00:08,  1.68it/s]Capturing CUDA graphs (decode, FULL):  65%|██████▍   | 24/37 [00:19<00:07,  1.78it/s]Capturing CUDA graphs (decode, FULL):  68%|██████▊   | 25/37 [00:20<00:06,  1.90it/s]Capturing CUDA graphs (decode, FULL):  70%|███████   | 26/37 [00:21<00:07,  1.43it/s]Capturing CUDA graphs (decode, FULL):  73%|███████▎  | 27/37 [00:21<00:06,  1.58it/s]Capturing CUDA graphs (decode, FULL):  76%|███████▌  | 28/37 [00:22<00:05,  1.72it/s]Capturing CUDA graphs (decode, FULL):  78%|███████▊  | 29/37 [00:22<00:04,  1.83it/s]Capturing CUDA graphs (decode, FULL):  81%|████████  | 30/37 [00:23<00:03,  1.90it/s]Capturing CUDA graphs (decode, FULL):  84%|████████▍ | 31/37 [00:23<00:03,  1.98it/s]Capturing CUDA graphs (decode, FULL):  86%|████████▋ | 32/37 [00:24<00:03,  1.46it/s]Capturing CUDA graphs (decode, FULL):  89%|████████▉ | 33/37 [00:25<00:02,  1.62it/s]Capturing CUDA graphs (decode, FULL):  92%|█████████▏| 34/37 [00:25<00:01,  1.76it/s]Capturing CUDA graphs (decode, FULL):  95%|█████████▍| 35/37 [00:26<00:01,  1.86it/s]Capturing CUDA graphs (decode, FULL):  97%|█████████▋| 36/37 [00:26<00:00,  1.94it/s]Capturing CUDA graphs (decode, FULL): 100%|██████████| 37/37 [00:27<00:00,  2.01it/s]Capturing CUDA graphs (decode, FULL): 100%|██████████| 37/37 [00:27<00:00,  1.36it/s]
+[0;36m(Worker_TP0 pid=1990528)[0;0m   [tilelang config] H=32, D=128, block_N=32, num_stages=2, LDS=32.0KB / 80KB
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:38:52 [gpu_model_runner.py:5545] Graph capturing finished in 50 secs, took 1.14 GiB
+[0;36m(EngineCore_DP0 pid=1990186)[0;0m INFO 08-24 10:38:53 [core.py:273] init engine (profile, create kv cache, warmup model) took 368.40 seconds
+[0;36m(EngineCore_DP0 pid=1990186)[0;0m INFO 08-24 10:38:56 [vllm.py:651] Asynchronous scheduling is enabled.
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:57 [api_server.py:665] Supported tasks: ['generate']
+[0;36m(APIServer pid=1989844)[0;0m WARNING 08-24 10:38:57 [model.py:1383] Default vLLM sampling parameters have been overridden by the model's `generation_config.json`: `{'temperature': 1.0, 'top_p': 0.95}`. If this is not intended, please relaunch vLLM instance with `--generation-config vllm`.
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:57 [serving.py:177] Warming up chat template processing...
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [hf.py:311] Detected the chat template content format to be 'openai'. You can set `--chat-template-content-format` to override this.
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [serving.py:212] Chat template warmup completed in 2615.1ms
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [api_server.py:946] Starting vLLM API server 0 on http://0.0.0.0:8000
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:38] Available routes are:
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /openapi.json, Methods: HEAD, GET
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /docs, Methods: HEAD, GET
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /docs/oauth2-redirect, Methods: HEAD, GET
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /redoc, Methods: HEAD, GET
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /scale_elastic_ep, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /is_scaling_elastic_ep, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /tokenize, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /detokenize, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /inference/v1/generate, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /pause, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /resume, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /is_paused, Methods: GET
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /metrics, Methods: GET
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /health, Methods: GET
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /v1/chat/completions, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /v1/chat/completions/render, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /v1/responses, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /v1/responses/{response_id}, Methods: GET
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /v1/responses/{response_id}/cancel, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /v1/audio/transcriptions, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /v1/audio/translations, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /v1/completions, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /v1/completions/render, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /v1/messages, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /v1/models, Methods: GET
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /load, Methods: GET
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /version, Methods: GET
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /ping, Methods: GET
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /ping, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /invocations, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /classify, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /v1/embeddings, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /score, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /v1/score, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /rerank, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /v1/rerank, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /v2/rerank, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:38:59 [launcher.py:46] Route: /pooling, Methods: POST
+[0;36m(APIServer pid=1989844)[0;0m INFO:     Started server process [1989844]
+[0;36m(APIServer pid=1989844)[0;0m INFO:     Waiting for application startup.
+[0;36m(APIServer pid=1989844)[0;0m INFO:     Application startup complete.
+[0;36m(APIServer pid=1989844)[0;0m INFO:     127.0.0.1:45164 - "GET /health HTTP/1.1" 200 OK
+[0;36m(APIServer pid=1989844)[0;0m WARNING 08-24 10:39:23 [input_processor.py:479] VLLM_DISABLE_REQUEST_ID_RANDOMIZATION is set and will be removed in a future release. Duplicate externally-provided request IDs may cause failures and/or subtle correctness errors.
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:39:30 [loggers.py:257] Engine 000: Avg prompt throughput: 3.1 tokens/s, Avg generation throughput: 23.1 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.9%, Prefix cache hit rate: 0.0%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:39:30 [metrics.py:100] SpecDecoding metrics: Mean acceptance length: 2.91, Accepted throughput: 4.51 tokens/s, Drafted throughput: 9.44 tokens/s, Accepted: 151 tokens, Drafted: 316 tokens, Per-position acceptance rate: 0.975, 0.595, 0.241, 0.101, Avg Draft acceptance rate: 47.8%
+[0;36m(APIServer pid=1989844)[0;0m INFO:     127.0.0.1:41346 - "POST /v1/completions HTTP/1.1" 200 OK
+[0;36m(APIServer pid=1989844)[0;0m INFO:     127.0.0.1:56740 - "GET /metrics HTTP/1.1" 200 OK
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:39:40 [loggers.py:257] Engine 000: Avg prompt throughput: 3.1 tokens/s, Avg generation throughput: 37.3 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.5%, Prefix cache hit rate: 0.0%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:39:40 [metrics.py:100] SpecDecoding metrics: Mean acceptance length: 2.84, Accepted throughput: 24.30 tokens/s, Drafted throughput: 52.80 tokens/s, Accepted: 243 tokens, Drafted: 528 tokens, Per-position acceptance rate: 0.909, 0.598, 0.258, 0.076, Avg Draft acceptance rate: 46.0%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:39:50 [loggers.py:257] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 38.5 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 1.5%, Prefix cache hit rate: 0.0%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:39:50 [metrics.py:100] SpecDecoding metrics: Mean acceptance length: 2.85, Accepted throughput: 25.00 tokens/s, Drafted throughput: 53.99 tokens/s, Accepted: 250 tokens, Drafted: 540 tokens, Per-position acceptance rate: 0.933, 0.578, 0.252, 0.089, Avg Draft acceptance rate: 46.3%
+[0;36m(APIServer pid=1989844)[0;0m INFO:     127.0.0.1:56746 - "POST /v1/completions HTTP/1.1" 200 OK
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:40:00 [loggers.py:257] Engine 000: Avg prompt throughput: 3.1 tokens/s, Avg generation throughput: 37.6 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 1.0%, Prefix cache hit rate: 0.0%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:40:00 [metrics.py:100] SpecDecoding metrics: Mean acceptance length: 2.86, Accepted throughput: 24.60 tokens/s, Drafted throughput: 52.80 tokens/s, Accepted: 246 tokens, Drafted: 528 tokens, Per-position acceptance rate: 0.947, 0.576, 0.242, 0.098, Avg Draft acceptance rate: 46.6%
+[0;36m(APIServer pid=1989844)[0;0m INFO:     127.0.0.1:56584 - "POST /v1/completions HTTP/1.1" 200 OK
+[0;36m(APIServer pid=1989844)[0;0m INFO:     127.0.0.1:53582 - "GET /metrics HTTP/1.1" 200 OK
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:40:10 [loggers.py:257] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 17.1 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.0%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:40:10 [metrics.py:100] SpecDecoding metrics: Mean acceptance length: 3.09, Accepted throughput: 11.70 tokens/s, Drafted throughput: 22.40 tokens/s, Accepted: 117 tokens, Drafted: 224 tokens, Per-position acceptance rate: 0.929, 0.714, 0.339, 0.107, Avg Draft acceptance rate: 52.2%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:40:20 [loggers.py:257] Engine 000: Avg prompt throughput: 3.1 tokens/s, Avg generation throughput: 4.6 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.3%, Prefix cache hit rate: 0.0%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:40:20 [metrics.py:100] SpecDecoding metrics: Mean acceptance length: 3.21, Accepted throughput: 3.10 tokens/s, Drafted throughput: 5.60 tokens/s, Accepted: 31 tokens, Drafted: 56 tokens, Per-position acceptance rate: 1.000, 0.786, 0.357, 0.071, Avg Draft acceptance rate: 55.4%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:40:30 [loggers.py:257] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 37.6 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 1.4%, Prefix cache hit rate: 0.0%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:40:30 [metrics.py:100] SpecDecoding metrics: Mean acceptance length: 2.81, Accepted throughput: 24.20 tokens/s, Drafted throughput: 53.60 tokens/s, Accepted: 242 tokens, Drafted: 536 tokens, Per-position acceptance rate: 0.940, 0.582, 0.209, 0.075, Avg Draft acceptance rate: 45.1%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:40:40 [loggers.py:257] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 45.3 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 2.6%, Prefix cache hit rate: 0.0%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:40:40 [metrics.py:100] SpecDecoding metrics: Mean acceptance length: 3.41, Accepted throughput: 32.00 tokens/s, Drafted throughput: 53.19 tokens/s, Accepted: 320 tokens, Drafted: 532 tokens, Per-position acceptance rate: 0.977, 0.744, 0.466, 0.218, Avg Draft acceptance rate: 60.2%
+[0;36m(APIServer pid=1989844)[0;0m INFO:     127.0.0.1:39446 - "POST /v1/completions HTTP/1.1" 200 OK
+[0;36m(APIServer pid=1989844)[0;0m INFO:     127.0.0.1:41230 - "GET /metrics HTTP/1.1" 200 OK
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:40:50 [loggers.py:257] Engine 000: Avg prompt throughput: 3.1 tokens/s, Avg generation throughput: 40.6 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.9%, Prefix cache hit rate: 0.0%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:40:50 [metrics.py:100] SpecDecoding metrics: Mean acceptance length: 3.10, Accepted throughput: 27.50 tokens/s, Drafted throughput: 52.40 tokens/s, Accepted: 275 tokens, Drafted: 524 tokens, Per-position acceptance rate: 0.977, 0.641, 0.321, 0.160, Avg Draft acceptance rate: 52.5%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:41:00 [loggers.py:257] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 38.5 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 1.9%, Prefix cache hit rate: 0.0%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:41:00 [metrics.py:100] SpecDecoding metrics: Mean acceptance length: 2.87, Accepted throughput: 25.10 tokens/s, Drafted throughput: 53.60 tokens/s, Accepted: 251 tokens, Drafted: 536 tokens, Per-position acceptance rate: 0.918, 0.560, 0.291, 0.104, Avg Draft acceptance rate: 46.8%
+[0;36m(APIServer pid=1989844)[0;0m INFO:     127.0.0.1:41240 - "POST /v1/completions HTTP/1.1" 200 OK
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:41:10 [loggers.py:257] Engine 000: Avg prompt throughput: 3.1 tokens/s, Avg generation throughput: 38.6 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.2%, Prefix cache hit rate: 0.0%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:41:10 [metrics.py:100] SpecDecoding metrics: Mean acceptance length: 2.95, Accepted throughput: 25.70 tokens/s, Drafted throughput: 52.80 tokens/s, Accepted: 257 tokens, Drafted: 528 tokens, Per-position acceptance rate: 0.780, 0.545, 0.348, 0.273, Avg Draft acceptance rate: 48.7%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:41:20 [loggers.py:257] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 39.8 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 1.2%, Prefix cache hit rate: 0.0%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:41:20 [metrics.py:100] SpecDecoding metrics: Mean acceptance length: 2.95, Accepted throughput: 26.30 tokens/s, Drafted throughput: 54.01 tokens/s, Accepted: 263 tokens, Drafted: 540 tokens, Per-position acceptance rate: 0.963, 0.615, 0.281, 0.089, Avg Draft acceptance rate: 48.7%
+[0;36m(APIServer pid=1989844)[0;0m INFO:     127.0.0.1:47188 - "POST /v1/completions HTTP/1.1" 200 OK
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:41:30 [loggers.py:257] Engine 000: Avg prompt throughput: 3.1 tokens/s, Avg generation throughput: 37.2 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.3%, Prefix cache hit rate: 0.0%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:41:30 [metrics.py:100] SpecDecoding metrics: Mean acceptance length: 2.86, Accepted throughput: 24.20 tokens/s, Drafted throughput: 52.00 tokens/s, Accepted: 242 tokens, Drafted: 520 tokens, Per-position acceptance rate: 0.923, 0.615, 0.269, 0.054, Avg Draft acceptance rate: 46.5%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:41:40 [loggers.py:257] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 37.6 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 1.4%, Prefix cache hit rate: 0.0%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:41:40 [metrics.py:100] SpecDecoding metrics: Mean acceptance length: 2.81, Accepted throughput: 24.20 tokens/s, Drafted throughput: 53.60 tokens/s, Accepted: 242 tokens, Drafted: 536 tokens, Per-position acceptance rate: 0.940, 0.582, 0.209, 0.075, Avg Draft acceptance rate: 45.1%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:41:50 [loggers.py:257] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 40.8 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 2.4%, Prefix cache hit rate: 0.0%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:41:50 [metrics.py:100] SpecDecoding metrics: Mean acceptance length: 3.04, Accepted throughput: 27.40 tokens/s, Drafted throughput: 53.60 tokens/s, Accepted: 274 tokens, Drafted: 536 tokens, Per-position acceptance rate: 0.955, 0.687, 0.306, 0.097, Avg Draft acceptance rate: 51.1%
+[0;36m(APIServer pid=1989844)[0;0m INFO:     127.0.0.1:52772 - "POST /v1/completions HTTP/1.1" 200 OK
+[0;36m(APIServer pid=1989844)[0;0m INFO:     127.0.0.1:53310 - "GET /metrics HTTP/1.1" 200 OK
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:42:00 [loggers.py:257] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 19.4 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.0%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:42:00 [metrics.py:100] SpecDecoding metrics: Mean acceptance length: 3.75, Accepted throughput: 14.30 tokens/s, Drafted throughput: 20.80 tokens/s, Accepted: 143 tokens, Drafted: 208 tokens, Per-position acceptance rate: 1.000, 0.962, 0.558, 0.231, Avg Draft acceptance rate: 68.8%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:42:10 [loggers.py:257] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.0%
+[0;36m(APIServer pid=1989844)[0;0m INFO 08-24 10:44:53 [launcher.py:110] Shutting down FastAPI HTTP server.
+[0;36m(Worker_TP2 pid=1990530)[0;0m   [tilelang config] H=32, D=128, block_N=32, num_stages=2, LDS=32.0KB / 80KB
+[0;36m(Worker_TP2 pid=1990530)[0;0m   [tilelang config] H=32, D=128, block_N=32, block_Q=4, num_stages=2, LDS=56.0KB / 64KB
+[0;36m(Worker_TP2 pid=1990530)[0;0m INFO 08-24 10:44:53 [multiproc_executor.py:730] Parent process exited, terminating worker
+[0;36m(Worker_TP0 pid=1990528)[0;0m   [tilelang config] H=32, D=128, block_N=32, block_Q=4, num_stages=2, LDS=56.0KB / 64KB
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:44:53 [multiproc_executor.py:730] Parent process exited, terminating worker
+[0;36m(Worker_TP6 pid=1990534)[0;0m   [tilelang config] H=32, D=128, block_N=32, num_stages=2, LDS=32.0KB / 80KB
+[0;36m(Worker_TP6 pid=1990534)[0;0m   [tilelang config] H=32, D=128, block_N=32, block_Q=4, num_stages=2, LDS=56.0KB / 64KB
+[0;36m(Worker_TP6 pid=1990534)[0;0m INFO 08-24 10:44:53 [multiproc_executor.py:730] Parent process exited, terminating worker
+[0;36m(Worker_TP4 pid=1990532)[0;0m   [tilelang config] H=32, D=128, block_N=32, num_stages=2, LDS=32.0KB / 80KB
+[0;36m(Worker_TP4 pid=1990532)[0;0m   [tilelang config] H=32, D=128, block_N=32, block_Q=4, num_stages=2, LDS=56.0KB / 64KB
+[0;36m(Worker_TP4 pid=1990532)[0;0m INFO 08-24 10:44:53 [multiproc_executor.py:730] Parent process exited, terminating worker
+[0;36m(Worker_TP5 pid=1990533)[0;0m   [tilelang config] H=32, D=128, block_N=32, num_stages=2, LDS=32.0KB / 80KB
+[0;36m(Worker_TP5 pid=1990533)[0;0m   [tilelang config] H=32, D=128, block_N=32, block_Q=4, num_stages=2, LDS=56.0KB / 64KB
+[0;36m(Worker_TP5 pid=1990533)[0;0m INFO 08-24 10:44:53 [multiproc_executor.py:730] Parent process exited, terminating worker
+[0;36m(Worker_TP2 pid=1990530)[0;0m INFO 08-24 10:44:53 [multiproc_executor.py:774] WorkerProc shutting down.
+[0;36m(Worker_TP7 pid=1990535)[0;0m   [tilelang config] H=32, D=128, block_N=32, num_stages=2, LDS=32.0KB / 80KB
+[0;36m(Worker_TP7 pid=1990535)[0;0m   [tilelang config] H=32, D=128, block_N=32, block_Q=4, num_stages=2, LDS=56.0KB / 64KB
+[0;36m(Worker_TP7 pid=1990535)[0;0m INFO 08-24 10:44:53 [multiproc_executor.py:730] Parent process exited, terminating worker
+[0;36m(Worker_TP0 pid=1990528)[0;0m INFO 08-24 10:44:53 [multiproc_executor.py:774] WorkerProc shutting down.
+[0;36m(Worker_TP1 pid=1990529)[0;0m   [tilelang config] H=32, D=128, block_N=32, num_stages=2, LDS=32.0KB / 80KB
+[0;36m(Worker_TP1 pid=1990529)[0;0m   [tilelang config] H=32, D=128, block_N=32, block_Q=4, num_stages=2, LDS=56.0KB / 64KB
+[0;36m(Worker_TP1 pid=1990529)[0;0m INFO 08-24 10:44:53 [multiproc_executor.py:730] Parent process exited, terminating worker
+[0;36m(Worker_TP6 pid=1990534)[0;0m INFO 08-24 10:44:53 [multiproc_executor.py:774] WorkerProc shutting down.
+[0;36m(Worker_TP4 pid=1990532)[0;0m INFO 08-24 10:44:53 [multiproc_executor.py:774] WorkerProc shutting down.
+[0;36m(Worker_TP5 pid=1990533)[0;0m INFO 08-24 10:44:53 [multiproc_executor.py:774] WorkerProc shutting down.
+[0;36m(Worker_TP3 pid=1990531)[0;0m   [tilelang config] H=32, D=128, block_N=32, num_stages=2, LDS=32.0KB / 80KB
+[0;36m(Worker_TP3 pid=1990531)[0;0m   [tilelang config] H=32, D=128, block_N=32, block_Q=4, num_stages=2, LDS=56.0KB / 64KB
+[0;36m(Worker_TP3 pid=1990531)[0;0m INFO 08-24 10:44:53 [multiproc_executor.py:730] Parent process exited, terminating worker
+[0;36m(Worker_TP7 pid=1990535)[0;0m INFO 08-24 10:44:53 [multiproc_executor.py:774] WorkerProc shutting down.
+[0;36m(Worker_TP1 pid=1990529)[0;0m INFO 08-24 10:44:53 [multiproc_executor.py:774] WorkerProc shutting down.
+[0;36m(Worker_TP3 pid=1990531)[0;0m INFO 08-24 10:44:53 [multiproc_executor.py:774] WorkerProc shutting down.
+[0;36m(APIServer pid=1989844)[0;0m INFO:     Shutting down
+[0;36m(APIServer pid=1989844)[0;0m INFO:     Waiting for application shutdown.
+[0;36m(APIServer pid=1989844)[0;0m INFO:     Application shutdown complete.

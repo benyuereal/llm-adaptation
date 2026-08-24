@@ -1,0 +1,58 @@
+# ============================================================================
+# [DEQUANT-ATTN] slimquant_w4a8.py — dequantize ALL attention int8 (w8a8)
+# linears to bf16 at load time (gated by VLLM_DEQUANT_ATTN=1).
+#
+# Root cause (profiled 2026-08-24, GLM-5.2-Channel-INT4-w4a8, MTP spec decode,
+# AMD ROCm gfx928, TP=8): the w8a8 int8 GEMM (lmslim matmul_int8, Triton) is
+# ~60% of decode GPU time and sits on a ~90us floor at small M (verify M=5 /
+# draft M=1) that no Triton config breaks. The library bf16 GEMM (rocBLAS)
+# has no such floor and is 2.5-2.8x faster on these attention shapes.
+#
+# Change: 2 hunks in model_executor/layers/quantization/slimquant_w4a8.py
+#   1. new helper _dequant_attn_enabled() (reads VLLM_DEQUANT_ATTN)
+#   2. in get_quant_method(), force dequant=True for LinearBase layers when
+#      VLLM_DEQUANT_ATTN=1 (MoE int4 w4a8 branch is NOT affected)
+#
+# Result: 19.68 -> 39.25 tok/s (~2x), accept length unchanged (2.887->2.960),
+# memory +3.59GB/rank.
+#
+# Apply:  bash apply_patch.sh   (whole-file overwrite, idempotent, .bak backup)
+# Revert: bash revert_patch.sh
+# ============================================================================
+--- /data1/csy/slimquant_w4a8.py.bak_dequant	2026-08-24 10:28:18.302764626 +0800
++++ /usr/local/lib/python3.10/dist-packages/vllm/model_executor/layers/quantization/slimquant_w4a8.py	2026-08-24 10:28:52.115873537 +0800
+@@ -92,6 +92,21 @@
+     return bool(re.search(rf"layers\.{idx}\.", prefix))
+ 
+ 
++def _dequant_attn_enabled() -> bool:
++    """[DEQUANT-ATTN] Dequantize ALL attention int8 (w8a8) linears to bf16.
++
++    Rationale (profiled 2026-08-24): the w8a8 int8 GEMM (lmslim matmul_int8,
++    Triton) is 60% of GPU time in MTP decode and sits on a ~90us floor at
++    small M (verify M=5 / draft M=1) that no Triton config breaks. The
++    library bf16 GEMM (rocBLAS) has no such floor and is 2.5-2.8x faster on
++    these attention shapes. Dequantizing the attention linears to bf16 at
++    load time removes the int8 GEMM entirely (and the activation quant).
++    MoE (int4 w4a8) is left untouched -- it is already fast.
++    Set VLLM_DEQUANT_ATTN=1 to enable.
++    """
++    return os.environ.get("VLLM_DEQUANT_ATTN", "0") == "1"
++
++
+ def _dequant_int4_packed(weight_int8: torch.Tensor,
+                          scale: torch.Tensor) -> torch.Tensor:
+     """Dequantize int4-packed (2-per-int8) MoE weights to bf16.
+@@ -188,6 +203,12 @@
+         dequant = _is_dequant_layer(prefix)
+ 
+         if isinstance(layer, LinearBase):
++            # [DEQUANT-ATTN] VLLM_DEQUANT_ATTN=1 -> dequant ALL attention
++            # int8 linears to bf16 (the int8 GEMM is 60% of decode GPU time
++            # and 2.5-2.8x slower than the bf16 GEMM at small M). MoE is
++            # handled in the FusedMoE branch below and is NOT affected.
++            if _dequant_attn_enabled():
++                dequant = True
+             return SlimQuantW4A8Int8LinearMethod(self, dequant=dequant)
+         elif isinstance(layer, FusedMoE):
+             if envs.VLLM_ROCM_USE_AITER_MOE:

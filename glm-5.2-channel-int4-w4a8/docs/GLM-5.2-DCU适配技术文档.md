@@ -19,7 +19,7 @@
 | 长输入 | 乱码率 70~90% | ✅ 乱码 0/10 |
 | HumanEval（思考模式） | 66.5% | ✅ 99 分（153 题已评分） |
 | 上下文长度 | — | 当前 16384，理论上限 ~520K |
-| 性能瓶颈定位 | — | 解码 launch-bound，带宽利用率 0.3% |
+| 性能优化 | 19.68 tok/s（MTP int8 baseline） | ✅ **39.25 tok/s**（dequant-attn，~2x，见 5.5） |
 
 ### 环境
 
@@ -270,6 +270,71 @@ MoE shape（per card, EP=8）：E=32, N1=512, N2=6144, K2=256, topk=8
 
 → tile tuning 改的是 GEMM 内部分块，但 GEMM 在 M=1 时只占总耗时极小部分，故无收益。
 
+### 5.5 MTP dequant-attn：attention int8 权重反量化为 bf16（2x 吞吐，已落地）
+
+> 本节是**真正落地并验证有效**的性能优化，推翻了 5.4「解码 launch-bound、GEMM 无收益」的初步判断。
+> 独立 patch 见 [`../mtp/`](../mtp/)（`apply_patch.sh` / `revert_patch.sh` / `README.md`）。
+
+#### 5.5.1 优化思路（为什么想到反量化）
+
+**第一步：profile 定位真瓶颈。** 用 `--profiler-config '{"profiler":"torch",...}'` 重启 MTP server，跑一次 512-token decode 抓 kernel 级 trace。结果颠覆了「MoE 是大头」的直觉：
+
+| Kernel | 占 GPU 时间 | 说明 |
+|--------|-----------|------|
+| **`matmul_kernel`（w8a8 int8 GEMM）** | **60.5%** | attention qkv/o + shared expert + DSA indexer 的 int8 线性 |
+| NCCL 通信 | 8.4% | TP=8 allreduce |
+| `fused_moe_kernel_int4_w4a8`（MoE） | 7.9% | 之前以为是大头，其实不是 |
+| torch.compile region | 7.4% | |
+
+**结论：瓶颈是 w8a8 int8 GEMM（attention 那些 int8 线性层），不是 MoE。**
+
+**第二步：诊断 int8 GEMM 为什么慢。** 单独 benchmark `lmslim matmul_int8`（Triton kernel）：
+- 大部分 shape 卡在 **~90µs 地板**，与 M/K/N 几乎无关（N=512 的 1MB 权重和 N=16384 的 12MB 权重都是 ~94µs）→ 不是带宽瓶颈，是**小 M 下 kernel 配置/占用率问题**
+- 换 Triton 配置（含 SPLIT_K）只能 1.11x，SPLIT_K 反而更慢
+- 对比 **bf16 GEMM（rocBLAS）：0.307ms/layer vs int8 0.855ms → 2.5~2.8x 更快**，且 bf16 路径**不量化激活**（精度还更高）
+- 其他 int8 后端全废：hipblaslt 19x 慢、rocblas/cutlass VMFault 崩溃
+- AITER 没有 dense int8 linear（只有 MoE op），帮不上 attention GEMM
+- `LMSLIM_USE_LIGHTOP=1` 设了但 `lightop_channel_int8_mm` op 未注册，一直 fallback 到 Triton
+
+**第三步：解法。** 既然 int8 GEMM 慢、bf16 GEMM 快且精度更高，那就**把 attention 的 int8 权重在加载时反量化成 bf16**，让 attention 线性走 bf16 GEMM。MoE 的 int4 权重不动（它已经够快，且反量化 MoE 显存代价太大）。
+
+#### 5.5.2 改动（2 处 hunk，单文件）
+
+文件：`vllm/model_executor/layers/quantization/slimquant_w4a8.py`
+1. 新增 `_dequant_attn_enabled()`：读环境变量 `VLLM_DEQUANT_ATTN`
+2. `get_quant_method()` 的 `LinearBase`（attention 线性）分支：`VLLM_DEQUANT_ATTN=1` 时强制 `dequant=True`（`FusedMoE` 分支不受影响）
+
+反量化是**数学精确**的：`bf16权重 = int8权重 × per-channel scale`，与 int8 GEMM 的 `x @ (int8×scale)` 完全等价，只是 GEMM kernel 从「int8 Triton（小 M 有地板）」换成「bf16 rocBLAS（无地板）」。
+
+#### 5.5.3 实测结果
+
+| 指标 | int8 baseline | dequant-attn | 变化 |
+|------|--------------|--------------|------|
+| 吞吐（512 tok） | 19.68 tok/s | **38.42 tok/s** | **1.95x** |
+| 吞吐（1024 tok ×3） | — | **39.25 tok/s** | ~2x |
+| 接受长度 | 2.887 | 2.960 | 无损（略升） |
+| pos0~3 接受率 | 0.95/0.62/0.24/0.07 | 0.92~0.94/0.60~0.62/0.26~0.30/0.09~0.12 | 无损 |
+| 显存 | — | +3.59GB/rank | 64GB 卡放得下 |
+
+**profile 复核**：dequant 后 `matmul_kernel`（int8 GEMM）从 60% 消失，新瓶颈分布为 MoE int4 15.4% + NCCL 15.2% + bf16 GEMM（Cijk/rocBLAS）~21% + torch.compile 7.6%——瓶颈从「单一 int8 GEMM」分散开，符合预期。
+
+#### 5.5.4 精度验证（HumanEval 思考模式）
+
+dequant 是数学精确的权重还原 + 更高精度激活，理论上不应影响精度。正在用 dequant-attn server 重跑 HumanEval 思考模式（164 题）确认无系统性精度下降（int8 baseline 参考 99.3%）。
+
+#### 5.5.5 用法
+
+```bash
+# 应用 patch（幂等，备份 .bak）
+bash mtp/apply_patch.sh
+# 启动（run_mtp_dequant_attn.sh 已含 export VLLM_DEQUANT_ATTN=1）
+bash mtp/run_mtp_dequant_attn.sh
+# 验证吞吐
+python3 mtp/bench_mtp.py 1 2 512
+# 回滚
+bash mtp/revert_patch.sh
+```
+
 ---
 
 ## 6. 适配度总结与后续方向
@@ -281,24 +346,32 @@ MoE shape（per card, EP=8）：E=32, N1=512, N2=6144, K2=256, topk=8
 | 功能适配 | ✅ 完成 | 长输入乱码清零，3 个独立 bug 修复 |
 | 精度适配 | ✅ 思考模式无损 | 99 分（153 题已评分） |
 | 部署适配 | ✅ 完成 | 启动崩溃修复，网络配置，启动脚本 |
-| 性能适配 | ⚠️ 基础可用 | GEMM 配置缺失，解码 launch-bound 待优化 |
+| 性能适配 | ✅ 已优化 | dequant-attn 落地：19.68 → 39.25 tok/s（~2x），接受长度无损（见 5.5） |
 
 ### 6.2 已验证无效的方向
 | 方向 | 解码收益 | 评估 |
 |------|---------|------|
 | Linear w8a8 tile tuning | 3~6% | ❌ 投入产出比低 |
 | MoE fused tile tuning | 0~2% | ❌ 投入产出比低 |
+| int8 GEMM 换后端（hipblaslt / rocblas / cutlass） | 19x 慢 / VMFault 崩溃 | ❌ 全废（见 5.5.1） |
+| Triton int8 配置调优（含 SPLIT_K） | 1.11x，SPLIT_K 更慢 | ❌ 打不破 ~90µs 地板 |
+| AITER dense int8 linear | 无此 op（只有 MoE） | ❌ 帮不上 attention GEMM |
+| `LMSLIM_USE_LIGHTOP=1` | op 未注册，fallback Triton | ❌ 无效 |
 
 ### 6.3 建议后续方向
+
+dequant-attn 落地后，profile 显示新瓶颈分布为：bf16 GEMM（Cijk/rocBLAS）~21%、MoE int4 15.4%、NCCL 15.2%、torch.compile 7.6%。
+
 | 方向 | 预期收益 | 代价 | 优先级 |
 |------|---------|------|--------|
 | 增大解码 batch（continuous batching） | 线性摊薄 launch 开销 | 无 | ★★★ |
-| 开 aiter MoE 路径（VLLM_ROCM_USE_AITER_MOE=1）对比 | 未知，可能显著 | 改 env + 功能验证 | ★★★ |
+| MoE int4 优化（aiter MoE 路径 A/B 对比） | 15.4% 占比，可能显著 | 改 env + 功能验证 | ★★★ |
+| NCCL 通信优化（TP=8 allreduce 15.2%） | 中等 | 通信调优 | ★★ |
 | kernel 融合（align+quant+GEMM） | 中等 | 改 lmslim 源码 | ★★ |
-| CPU 查表消除（配置预加载） | 小 | 改 lmslim 源码 | ★ |
 | prefill 阶段 tile tuning（大 M） | 中等 | 数小时 tuning | ★★ |
+| CPU 查表消除（配置预加载） | 小 | 改 lmslim 源码 | ★ |
 
-**核心判断**：解码阶段优化重点不在 GEMM tile，而在减少 kernel 数量 / 增大 batch 摊薄 launch 开销。aiter MoE 路径是最值得优先验证的方向。
+**核心判断**：dequant-attn 已消除最大单一瓶颈（int8 GEMM 60%）。下一步重点：① 增大 batch 摊薄 launch 开销；② MoE int4（15.4%）与 NCCL（15.2%）的 A/B 对比优化。
 
 ---
 
@@ -315,6 +388,11 @@ MoE shape（per card, EP=8）：E=32, N1=512, N2=6144, K2=256, topk=8
 | `apply_patch.sh` | vllm patch 应用（检测已应用则跳过） | — |
 | `evalscope_apply_patch.sh` / `evalscope_revert_patch.sh` | evalscope patch 应用/回滚 | — |
 | `start.sh` | 性能模式启动脚本 | 部署 |
+| `mtp/vllm_patches/slimquant_w4a8.patch` | dequant-attn patch（attention int8→bf16） | 性能优化 5.5 |
+| `mtp/apply_patch.sh` / `mtp/revert_patch.sh` | dequant-attn patch 应用/回滚 | 性能优化 5.5 |
+| `mtp/run_mtp_dequant_attn.sh` | dequant-attn 启动脚本（含 `VLLM_DEQUANT_ATTN=1`） | 性能优化 5.5 |
+| `mtp/bench_mtp.py` | MTP 吞吐/接受长度 benchmark | 性能优化 5.5 |
+| `mtp/README.md` | dequant-attn 优化说明 | 性能优化 5.5 |
 
 ## 附录 B：相关文档
 - [`glm52-long-input-garbage-rootcause.md`](glm52-long-input-garbage-rootcause.md) — 长输入乱码完整排查现场

@@ -1,0 +1,107 @@
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                   execute_context_0(0)_generation_1(5)         0.00%       0.000us         0.00%       0.000us       0.000us       23.284s        88.12%       23.284s     134.592ms           173  
+                                          matmul_kernel         0.00%       0.000us         0.00%       0.000us       0.000us       15.984s        60.49%       15.984s     199.696us         80040  
+ncclDevKernel_Generic_4(ncclDevKernelArgsStorage<102...         0.00%       0.000us         0.00%       0.000us       0.000us        2.227s         8.43%        2.227s      75.729us         29406  
+                             fused_moe_kernel_int4_w4a8         0.00%       0.000us         0.00%       0.000us       0.000us        2.092s         7.92%        2.092s      76.087us         27492  
+                             Torch-Compiled Region: 2/0         0.40%     101.606ms         7.56%        1.935s       2.780ms        1.944s         7.36%        2.084s       2.994ms           696  
+                                  _per_token_quant_int8         0.00%       0.000us         0.00%       0.000us       0.000us     660.276ms         2.50%     660.276ms       6.140us        107532  
+                                               aten::mm         0.20%      50.376ms         0.28%      72.103ms      82.877us     641.153ms         2.43%     641.153ms     736.957us           870  
+Cijk_Alik_Bljk_BBH_MT64x32x32_SE_AMAS3_BL1_DRB16_ALT...         0.00%       0.000us         0.00%       0.000us       0.000us     641.153ms         2.43%     641.153ms     736.957us           870  
+Cijk_Ailk_Bljk_BBH_MT32x32x32_SE_AMAS3_BL1_DRB16_ALT...         0.00%       0.000us         0.00%       0.000us       0.000us     480.806ms         1.82%     480.806ms      26.714us         17998  
+void at::native::reduce_kernel<128, 4, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us     402.057ms         1.52%     402.057ms      28.179us         14268  
+Cijk_Alik_Bljk_BBH_MT64x64x32_SE_AMAS3_BL1_DRB16_ALT...         0.00%       0.000us         0.00%       0.000us       0.000us     362.636ms         1.37%     362.636ms     521.778us           695  
+                                      main_split_kernel         0.00%       0.000us         0.00%       0.000us       0.000us     207.141ms         0.78%     207.141ms      14.518us         14268  
+Cijk_Ailk_Bljk_BBH_MT32x16x32_SE_AMAS3_BL1_DRB16_ALT...         0.00%       0.000us         0.00%       0.000us       0.000us     197.164ms         0.75%     197.164ms      14.426us         13667  
+                  execute_context_1(31)_generation_0(0)         0.00%       0.000us         0.00%       0.000us       0.000us     189.383ms         0.72%     189.383ms     189.383ms             1  
+void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us     185.154ms         0.70%     185.154ms       6.735us         27492  
+                                          kernel_kernel         0.00%       0.000us         0.00%       0.000us       0.000us     180.564ms         0.68%     180.564ms      20.755us          8700  
+                             Torch-Compiled Region: 0/0         0.02%       5.377ms         0.41%     104.418ms     104.418ms     171.437ms         0.65%     182.789ms     182.789ms             1  
+void at::native::moe_fused_gate_kernel_gourp1<__hip_...         0.00%       0.000us         0.00%       0.000us       0.000us     164.003ms         0.62%     164.003ms      11.931us         13746  
+Cijk_Alik_Bljk_BBH_MT16x16x16_SE_AMAS3_BL1_DRB16_ALT...         0.00%       0.000us         0.00%       0.000us       0.000us     150.228ms         0.57%     150.228ms      10.992us         13667  
+                                            aten::copy_         0.59%     150.939ms         2.44%     625.978ms      34.398us     140.104ms         0.53%     144.743ms       7.954us         18198  
+                                         Cijk_B_PostGSU         0.00%       0.000us         0.00%       0.000us       0.000us     119.328ms         0.45%     119.328ms       6.350us         18792  
+                         Memcpy DtoD (Device -> Device)         0.00%       0.000us         0.00%       0.000us       0.000us     103.392ms         0.39%     103.392ms       5.827us         17744  
+                      triton_poi_fused_mul_silu_slice_0         0.00%       0.000us         0.00%       0.000us       0.000us      98.424ms         0.37%      98.424ms       7.160us         13746  
+void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us      97.981ms         0.37%      97.981ms       6.867us         14268  
+              _convert_req_index_to_global_index_kernel         0.00%       0.000us         0.00%       0.000us       0.000us      92.631ms         0.35%      92.631ms       6.492us         14268  
+void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us      92.242ms         0.35%      92.242ms       6.465us         14268  
+                  triton_poi_fused_add_all_reduce_mul_2         0.00%       0.000us         0.00%       0.000us       0.000us      89.246ms         0.34%      89.246ms       6.492us         13746  
+                                     triton_poi_fused_0         0.00%       0.000us         0.00%       0.000us       0.000us      88.643ms         0.34%      88.643ms       6.213us         14268  
+triton_red_fused__to_copy_add_mean_moe_forward_share...         0.00%       0.000us         0.00%       0.000us       0.000us      87.995ms         0.33%      87.995ms       6.402us         13746  
+void vllm::concat_and_cache_mla_kernel<__hip_bfloat1...         0.00%       0.000us         0.00%       0.000us       0.000us      87.434ms         0.33%      87.434ms       6.128us         14268  
+void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us      85.099ms         0.32%      85.099ms       6.191us         13746  
+                                    main_split_kernel_1         0.00%       0.000us         0.00%       0.000us       0.000us      83.044ms         0.31%      83.044ms       5.820us         14268  
+                                     triton_poi_fused_4         0.00%       0.000us         0.00%       0.000us       0.000us      82.720ms         0.31%      82.720ms       6.018us         13746  
+                                     triton_red_fused_5         0.00%       0.000us         0.00%       0.000us       0.000us      80.219ms         0.30%      80.219ms       6.230us         12876  
+void vllm::act_and_mul_kernel<c10::BFloat16, &(c10::...         0.00%       0.000us         0.00%       0.000us       0.000us      80.059ms         0.30%      80.059ms       5.824us         13746  
+                                 _moe_sum_reduce_kernel         0.00%       0.000us         0.00%       0.000us       0.000us      77.355ms         0.29%      77.355ms       5.627us         13746  
+void at::native::moe_align_block_size_kernel_opt_fus...         0.00%       0.000us         0.00%       0.000us       0.000us      75.220ms         0.28%      75.220ms       5.503us         13670  
+                                         aten::_softmax         0.03%       8.448ms         0.11%      28.967ms      33.334us      74.413ms         0.28%      74.413ms      85.631us           869  
+void at::native::(anonymous namespace)::cunn_SoftMax...         0.00%       0.000us         0.00%       0.000us       0.000us      74.413ms         0.28%      74.413ms      85.631us           869  
+triton_red_fused__to_copy_add_empty_like_mean_mul_po...         0.00%       0.000us         0.00%       0.000us       0.000us      73.906ms         0.28%      73.906ms       7.585us          9744  
+                    triton_poi_fused_empty_like_zeros_6         0.00%       0.000us         0.00%       0.000us       0.000us      66.030ms         0.25%      66.030ms       6.776us          9744  
+                                     record_param_comms         0.43%     109.174ms         0.54%     138.331ms     159.001us      65.078ms         0.25%      65.118ms      74.849us           870  
+ncclDevKernel_AllGather_Ring_LL_Sum_i8(ncclDevKernel...         0.00%       0.000us         0.00%       0.000us       0.000us      65.078ms         0.25%      65.078ms      74.802us           870  
+                                  nccl:_all_gather_base         0.00%       0.000us         0.00%       0.000us       0.000us      65.078ms         0.25%      65.078ms      74.802us           870  
+void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us      63.290ms         0.24%      63.290ms      10.107us          6262  
+triton_poi_fused_add_copy_index_select_mul_slice_spl...         0.00%       0.000us         0.00%       0.000us       0.000us      56.701ms         0.21%      56.701ms       5.717us          9918  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      43.789ms         0.17%      43.789ms       6.628us          6607  
+                           Memcpy HtoD (Host -> Device)         0.00%       0.000us         0.00%       0.000us       0.000us      37.320ms         0.14%      37.320ms      10.721us          3481  
+                                           aten::argmax         0.08%      21.363ms         0.24%      60.956ms      70.064us      33.050ms         0.13%      33.050ms      37.988us           870  
+                                            aten::fill_         0.20%      52.317ms         0.65%     165.899ms      23.802us      32.419ms         0.12%      32.425ms       4.652us          6970  
+                                              aten::max         0.11%      29.013ms         0.21%      53.454ms      26.888us      31.360ms         0.12%      31.360ms      15.775us          1988  
+                           _indexer_k_bf16_cache_kernel         0.00%       0.000us         0.00%       0.000us       0.000us      28.831ms         0.11%      28.831ms       6.628us          4350  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      25.680ms         0.10%      25.680ms       5.934us          4328  
+     triton_red_fused__to_copy_add_mean_mul_pow_rsqrt_3         0.00%       0.000us         0.00%       0.000us       0.000us      25.443ms         0.10%      25.443ms       7.696us          3306  
+                              vllm::sparse_attn_indexer         1.18%     301.572ms         1.97%     504.007ms     702.939us      25.225ms         0.10%      45.097ms      62.897us           717  
+                vllm::unified_mla_attention_with_output         1.24%     317.665ms         2.84%     728.077ms     940.668us      25.058ms         0.09%     105.681ms     136.539us           774  
+void vllm::topKPerRowDecode<512, true, false, false>...         0.00%       0.000us         0.00%       0.000us       0.000us      24.416ms         0.09%      24.416ms       5.641us          4328  
+                                              aten::bmm         0.27%      68.834ms         0.43%     110.120ms      71.137us      24.325ms         0.09%      24.325ms      15.714us          1548  
+triton_poi_fused_add_cat_index_select_mul_slice_spli...         0.00%       0.000us         0.00%       0.000us       0.000us      22.404ms         0.08%      22.404ms       5.598us          4002  
+                                            aten::index         0.20%      50.406ms         0.70%     179.204ms      79.399us      22.347ms         0.08%      34.205ms      15.155us          2257  
+void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us      21.351ms         0.08%      21.351ms       6.843us          3120  
+triton_poi_fused_add_copy_index_select_mul_slice_spl...         0.00%       0.000us         0.00%       0.000us       0.000us      19.279ms         0.07%      19.279ms       6.156us          3132  
+                                     triton_poi_fused_7         0.00%       0.000us         0.00%       0.000us       0.000us      19.142ms         0.07%      19.142ms       6.112us          3132  
+void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us      16.903ms         0.06%      16.903ms      24.285us           696  
+                                              aten::mul         0.10%      25.547ms         0.28%      71.883ms      34.443us      16.284ms         0.06%      16.289ms       7.805us          2087  
+                                              aten::add         0.10%      24.389ms         0.25%      65.112ms      31.169us      15.434ms         0.06%      15.434ms       7.388us          2089  
+                                              aten::cat         0.08%      20.697ms         0.22%      55.343ms      42.637us      15.347ms         0.06%      15.353ms      11.828us          1298  
+                     hipThreadExchangeStreamCaptureMode         0.01%       1.584ms         0.01%       1.589ms       0.473us      13.717ms         0.05%      13.717ms       4.087us          3356  
+void at::native::index_elementwise_kernel<128, 4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      13.605ms         0.05%      13.605ms      11.235us          1211  
+void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us      11.834ms         0.04%      11.834ms      68.010us           174  
+Cijk_Ailk_Bljk_BBH_MT32x32x32_SE_AMAS3_BL1_DRB16_ALT...         0.00%       0.000us         0.00%       0.000us       0.000us      11.378ms         0.04%      11.378ms      21.796us           522  
+                                 hipPointerGetAttribute         0.03%       7.566ms         0.03%       7.567ms       0.895us      11.272ms         0.04%      11.272ms       1.333us          8454  
+                                     aten::index_select         0.06%      16.221ms         0.17%      43.875ms      35.904us      11.182ms         0.04%      11.182ms       9.151us          1222  
+                                             aten::mean         0.04%      10.547ms         0.10%      26.660ms      38.304us       8.609ms         0.03%       8.609ms      12.370us           696  
+void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us       8.609ms         0.03%       8.609ms      12.370us           696  
+                                              aten::sub         0.14%      35.440ms         0.34%      86.627ms      33.127us       8.474ms         0.03%       8.474ms       3.240us          2615  
+                                  hipModuleLaunchKernel         0.23%      59.462ms         0.23%      59.462ms      29.249us       7.516ms         0.03%       7.516ms       3.697us          2033  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       7.266ms         0.03%       7.266ms       6.000us          1211  
+                                aten::repeat_interleave         0.10%      24.861ms         1.20%     306.395ms     146.181us       6.716ms         0.03%      51.430ms      24.537us          2096  
+void compute_cuda_kernel<int>(int const*, long const...         0.00%       0.000us         0.00%       0.000us       0.000us       6.716ms         0.03%       6.716ms       6.470us          1038  
+void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us       6.682ms         0.03%       6.682ms       9.601us           696  
+                                           aten::cumsum         0.10%      25.921ms         0.33%      83.662ms      79.527us       6.578ms         0.02%      13.407ms      12.745us          1052  
+void rocprim::detail::single_scan_kernel<false, rocp...         0.00%       0.000us         0.00%       0.000us       0.000us       6.578ms         0.02%       6.578ms       6.337us          1038  
+                                     aten::masked_fill_         0.04%       9.191ms         0.12%      31.452ms      30.127us       6.560ms         0.02%       6.560ms       6.283us          1044  
+void at::native::(anonymous namespace)::indexSelectS...         0.00%       0.000us         0.00%       0.000us       0.000us       6.552ms         0.02%       6.552ms       9.468us           692  
+                                             aten::add_         0.04%       9.934ms         0.13%      32.249ms      30.714us       6.268ms         0.02%       6.268ms       5.970us          1050  
+                                            aten::rsqrt         0.03%       7.056ms         0.09%      21.936ms      31.517us       6.178ms         0.02%       6.178ms       8.876us           696  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       6.178ms         0.02%       6.178ms       8.876us           696  
+void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us       6.094ms         0.02%       6.094ms       7.013us           869  
+                                               aten::ge         0.03%       7.974ms         0.07%      19.070ms      35.846us       5.745ms         0.02%       5.745ms      10.800us           532  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       5.745ms         0.02%       5.745ms      11.007us           522  
+void at::native::fused_fill_rms_x2_concat_kernel<c10...         0.00%       0.000us         0.00%       0.000us       0.000us       5.591ms         0.02%       5.591ms       8.033us           696  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       5.533ms         0.02%       5.533ms       6.374us           868  
+Cijk_Alik_Bljk_BBH_MT16x16x32_SE_AMAS3_BL1_DRB16_ALT...         0.00%       0.000us         0.00%       0.000us       0.000us       5.410ms         0.02%       5.410ms      10.364us           522  
+void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us       5.377ms         0.02%       5.377ms      10.301us           522  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       5.359ms         0.02%       5.359ms       6.167us           869  
+                                           aten::clamp_         0.05%      12.548ms         0.12%      31.262ms      36.016us       5.101ms         0.02%       5.121ms       5.900us           868  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       5.101ms         0.02%       5.101ms       5.876us           868  
+triton_poi_fused_add_copy_index_select_mul_slice_spl...         0.00%       0.000us         0.00%       0.000us       0.000us       5.074ms         0.02%       5.074ms       5.832us           870  
+     triton_red_fused__to_copy_add_mean_mul_pow_rsqrt_1         0.00%       0.000us         0.00%       0.000us       0.000us       5.015ms         0.02%       5.015ms       5.764us           870  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 25.606s
+Self CUDA time total: 26.424s
+
